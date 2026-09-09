@@ -150,7 +150,17 @@ function vitePluginManusDebugCollector(): Plugin {
   };
 }
 
-const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector()];
+const plugins = [
+  react(),
+  tailwindcss(),
+  jsxLocPlugin(),
+  vitePluginManusRuntime(),
+];
+
+// Only add debug collector in development
+if (process.env.NODE_ENV !== "production") {
+  plugins.push(vitePluginManusDebugCollector());
+}
 
 export default defineConfig({
   plugins,
@@ -170,15 +180,6 @@ export default defineConfig({
   },
   server: {
     host: true,
-    allowedHosts: [
-      ".manuspre.computer",
-      ".manus.computer",
-      ".manus-asia.computer",
-      ".manuscomputer.ai",
-      ".manusvm.computer",
-      "localhost",
-      "127.0.0.1",
-    ],
     fs: {
       strict: true,
       deny: ["**/.*"],

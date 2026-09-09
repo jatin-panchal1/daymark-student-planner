@@ -82,7 +82,11 @@ export function registerGoogleAuthRoutes(app: Express) {
 
   // Step 1: Redirect to Google's OAuth consent screen (or dev mode bypass)
   app.get("/api/auth/google", async (req: Request, res: Response) => {
-    if (!clientId) {
+    if (!clientId || !clientSecret) {
+      if (process.env.NODE_ENV === "production") {
+        return res.status(500).json({ error: "OAuth is not configured on this server." });
+      }
+      
       // Dev mode: auto-login with a local dev user when Google OAuth isn't configured
       console.log("[Auth] Dev mode: creating local session (no Google credentials configured)");
       const devUser: Parameters<typeof createSessionToken>[0] = {
@@ -199,7 +203,7 @@ export function registerGoogleAuthRoutes(app: Express) {
       // Create session JWT and set cookie
       const sessionToken = await createSessionToken(user);
 
-      const isSecure = req.headers["x-forwarded-proto"] === "https" || req.protocol === "https";
+      const isSecure = process.env.NODE_ENV === "production" || req.headers["x-forwarded-proto"] === "https" || req.protocol === "https";
       res.cookie(SESSION_COOKIE, sessionToken, {
         httpOnly: true,
         secure: isSecure,
@@ -213,7 +217,7 @@ export function registerGoogleAuthRoutes(app: Express) {
       if (state && typeof state === "string") {
         try {
           const parsed = JSON.parse(Buffer.from(state, "base64url").toString());
-          if (parsed.returnTo) returnTo = parsed.returnTo;
+          if (parsed.returnTo && parsed.returnTo.startsWith("/")) returnTo = parsed.returnTo;
         } catch { /* ignore */ }
       }
 

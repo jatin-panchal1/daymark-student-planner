@@ -9,6 +9,7 @@ function isIpAddress(host: string) {
 }
 
 function isSecureRequest(req: Request) {
+  if (process.env.NODE_ENV === "production") return true;
   if (req.protocol === "https") return true;
 
   const forwardedProto = req.headers["x-forwarded-proto"];
