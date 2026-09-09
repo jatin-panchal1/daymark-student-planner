@@ -1,6 +1,7 @@
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import type { User } from "../../drizzle/schema";
 import { sdk } from "./sdk";
+import { getUserFromRequest } from "../auth";
 
 export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
@@ -13,11 +14,21 @@ export async function createContext(
 ): Promise<TrpcContext> {
   let user: User | null = null;
 
+  // Try Google OAuth session first
   try {
-    user = await sdk.authenticateRequest(opts.req);
-  } catch (error) {
-    // Authentication is optional for public procedures.
+    user = await getUserFromRequest(opts.req);
+  } catch {
     user = null;
+  }
+
+  // Fall back to Manus OAuth if Google auth didn't yield a user
+  if (!user) {
+    try {
+      user = await sdk.authenticateRequest(opts.req);
+    } catch {
+      // Authentication is optional for public procedures.
+      user = null;
+    }
   }
 
   return {

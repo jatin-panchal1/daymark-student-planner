@@ -1,56 +1,89 @@
-import { boolean, date, index, int, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { boolean, date, index, integer, pgTable, text, timestamp, varchar } from "drizzle-orm/pg-core";
 
-export const users = mysqlTable("users", {
-  id: int("id").autoincrement().primaryKey(),
+export const users = pgTable("users", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
   email: varchar("email", { length: 320 }),
+  avatarUrl: text("avatarUrl"),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: varchar("role", { length: 16 }).default("user").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
 });
 
-export const subjects = mysqlTable("subjects", {
-  id: int("id").autoincrement().primaryKey(),
+export const subjects = pgTable("subjects", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   name: varchar("name", { length: 120 }).notNull(),
   code: varchar("code", { length: 40 }),
   color: varchar("color", { length: 20 }),
-  userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => ({ userIdx: index("subjects_user_idx").on(table.userId) }));
 
-export const schedules = mysqlTable("schedule", {
-  id: int("id").autoincrement().primaryKey(),
-  subjectId: int("subjectId").notNull().references(() => subjects.id, { onDelete: "cascade" }),
-  dayOfWeek: int("dayOfWeek").notNull(),
+export const schedules = pgTable("schedule", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  subjectId: integer("subjectId").notNull().references(() => subjects.id, { onDelete: "cascade" }),
+  dayOfWeek: integer("dayOfWeek").notNull(),
   startTime: varchar("startTime", { length: 10 }),
-  userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
 }, (table) => ({ subjectIdx: index("schedule_subject_idx").on(table.subjectId), userIdx: index("schedule_user_idx").on(table.userId) }));
 
-export const tasks = mysqlTable("tasks", {
-  id: int("id").autoincrement().primaryKey(),
+export const tasks = pgTable("tasks", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   title: varchar("title", { length: 255 }).notNull(),
-  subjectId: int("subjectId").references(() => subjects.id, { onDelete: "set null" }),
+  subjectId: integer("subjectId").references(() => subjects.id, { onDelete: "set null" }),
   isCompleted: boolean("isCompleted").default(false).notNull(),
   dueDate: date("dueDate"),
   priority: varchar("priority", { length: 16 }).default("Medium").notNull(),
   recurringDays: varchar("recurringDays", { length: 32 }),
-  userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => ({ userIdx: index("tasks_user_idx").on(table.userId), dueIdx: index("tasks_due_idx").on(table.dueDate) }));
 
-export const libraryBooks = mysqlTable("libraryBooks", {
-  id: int("id").autoincrement().primaryKey(),
+export const libraryBooks = pgTable("libraryBooks", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   title: varchar("title", { length: 255 }).notNull(),
   author: varchar("author", { length: 180 }),
   issuedOn: date("issuedOn"),
   returnBy: date("returnBy"),
-  userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => ({ userIdx: index("library_books_user_idx").on(table.userId) }));
 
+export const calendarEvents = pgTable("calendarEvents", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  kind: varchar("kind", { length: 16 }).notNull(), // "holiday" | "dayoff" | "exam"
+  title: varchar("title", { length: 255 }).notNull(),
+  startDate: date("startDate").notNull(),
+  endDate: date("endDate"),
+  subject: varchar("subject", { length: 255 }),
+  examTime: varchar("examTime", { length: 16 }),
+  afterClass: boolean("afterClass").default(false),
+  afterSubject: varchar("afterSubject", { length: 255 }),
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({ userIdx: index("calendar_events_user_idx").on(table.userId) }));
+
+export const classCheckins = pgTable("classCheckins", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  subjectId: integer("subjectId").notNull().references(() => subjects.id, { onDelete: "cascade" }),
+  checkinDate: date("checkinDate").notNull(),
+  status: varchar("status", { length: 16 }).notNull(), // "attended" | "absent"
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({ userIdx: index("checkins_user_idx").on(table.userId), dateIdx: index("checkins_date_idx").on(table.checkinDate) }));
+
+export const codingSettings = pgTable("codingSettings", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  leetcodeUsername: varchar("leetcodeUsername", { length: 100 }),
+  codeforcesHandle: varchar("codeforcesHandle", { length: 100 }),
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }).unique(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+
+// Type exports
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type Subject = typeof subjects.$inferSelect;
@@ -61,3 +94,9 @@ export type Task = typeof tasks.$inferSelect;
 export type InsertTask = typeof tasks.$inferInsert;
 export type LibraryBook = typeof libraryBooks.$inferSelect;
 export type InsertLibraryBook = typeof libraryBooks.$inferInsert;
+export type CalendarEvent = typeof calendarEvents.$inferSelect;
+export type InsertCalendarEvent = typeof calendarEvents.$inferInsert;
+export type ClassCheckin = typeof classCheckins.$inferSelect;
+export type InsertClassCheckin = typeof classCheckins.$inferInsert;
+export type CodingSetting = typeof codingSettings.$inferSelect;
+export type InsertCodingSetting = typeof codingSettings.$inferInsert;
