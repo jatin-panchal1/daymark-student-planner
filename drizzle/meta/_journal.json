@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1788904226676,
+      "tag": "0000_daily_screwball",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1788904495337,
+      "tag": "0001_daily_pete_wisdom",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1788936043125,
+      "tag": "0002_omniscient_blur",
+      "breakpoints": true
+    }
+  ]
+}
