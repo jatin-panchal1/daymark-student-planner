@@ -1,6 +1,11 @@
+// Vercel Serverless Function entry point.
+// We import from the esbuild-bundled output where all path aliases
+// (@shared/*, etc.) have already been resolved during `pnpm build`.
 import "dotenv/config";
 process.env.NODE_ENV = process.env.NODE_ENV || "production";
-import app from "../server/_core/index.js";
 
-// Export the Express app as a Vercel Serverless Function
+// The build step bundles server/_core/index.ts → dist/index.js
+// We re-export that bundled Express app for Vercel.
+import app from "../dist/index.js";
+
 export default app;
