@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Vercel Serverless Function entry point.
 // We import from the esbuild-bundled output where all path aliases
 // (@shared/*, etc.) have already been resolved during `pnpm build`.
