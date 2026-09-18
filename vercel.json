@@ -1,8 +1,14 @@
 {
   "version": 2,
+  "installCommand": "pnpm install",
   "buildCommand": "pnpm build",
   "outputDirectory": "dist/public",
-  "framework": "vite",
+  "functions": {
+    "api/index.mjs": {
+      "maxDuration": 30,
+      "includeFiles": "node_modules/**"
+    }
+  },
   "headers": [
     {
       "source": "/sw.js",
@@ -21,7 +27,7 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "/api/index"
+      "destination": "/api/index.mjs"
     },
     {
       "source": "/(.*)",
@@ -29,3 +35,4 @@
     }
   ]
 }
+
