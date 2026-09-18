@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
-  ArrowRight, BarChart3, BookOpen, CalendarDays, Check, ChevronDown, CircleHelp,
+  ArrowRight, BarChart3, BookOpen, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp,
   Clock3, Flame, FileJson, Library, LayoutDashboard, ListChecks, Menu, MoreHorizontal,
   Plus, RefreshCw, Search, Settings2, Sparkles, Target, Timer, Trash2, TrendingUp, X,
 } from "lucide-react";
@@ -168,7 +168,7 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
   const todayDow = new Date().getDay(); // 0=Sun
 
   const [selectedDay, setSelectedDay] = useState(new Date().getDate());
-  const [activeView, setActiveView] = useState<"today" | "planner" | "library" | "attendance" | "coding">("today");
+  const [activeView, setActiveView] = useState<"today" | "planner" | "library" | "attendance" | "coding" | "calendar">("today");
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [showSubjectForm, setShowSubjectForm] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
@@ -204,6 +204,10 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
   const [showProfile, setShowProfile] = useState(false);
   const [lcInput, setLcInput] = useState("");
   const [cfInput, setCfInput] = useState("");
+  const [importModeFile, setImportModeFile] = useState<File | null>(null);
+  const [showImportMode, setShowImportMode] = useState(false);
+  const [calMonth, setCalMonth] = useState(new Date().getMonth());
+  const [calYear, setCalYear] = useState(new Date().getFullYear());
 
   const trpcCtx = trpc.useContext();
   
@@ -292,30 +296,32 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
 
   const codingStats = useMemo<CodingStats>(() => {
     const lcSolved = lcData?.profile?.totalSolved ?? 0;
-    const cfSolved = (cfData as any)?.solved ?? 0;
+    const cfSolved = (cfData as any)?.solvedCount?.total ?? 0;
     const streak = lcData?.calendar?.streak ?? 0;
     const lcRecent = (lcData?.submissions ?? []).slice(0, 3).map((s: any) => ({
       platform: "LeetCode" as const,
       title: s.title,
       date: new Date(s.timestamp * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
     }));
-    const cfRecent = ((cfData as any)?.recentSubmissions ?? []).slice(0, 3).map((s: any) => ({
+    const cfRecent = ((cfData as any)?.submissions ?? []).filter((s: any) => s.verdict === "OK").slice(0, 3).map((s: any) => ({
       platform: "Codeforces" as const,
-      title: s.problem?.name ?? String(s.id),
-      date: new Date(s.creationTimeSeconds * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      title: s.problemName ?? String(s.id),
+      date: new Date(s.timestamp * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
     }));
     return {
       codeforcesSolved: cfSolved,
-      codeforcesTarget: 200,
+      codeforcesTarget: codingSettings?.codeforcesTarget ?? 200,
       leetcodeSolved: lcSolved,
-      leetcodeTarget: 150,
+      leetcodeTarget: codingSettings?.leetcodeTarget ?? 150,
       streak,
       recent: [...lcRecent, ...cfRecent].slice(0, 5),
     };
-  }, [lcData, cfData]);
+  }, [lcData, cfData, codingSettings]);
 
   const createSubjectMut = trpc.planner.createSubject.useMutation({ onSuccess: () => { trpcCtx.planner.subjects.invalidate(); trpcCtx.planner.schedules.invalidate(); }});
+  const upsertSubjectMut = trpc.planner.upsertSubject.useMutation({ onSuccess: () => { trpcCtx.planner.subjects.invalidate(); trpcCtx.planner.schedules.invalidate(); }});
   const deleteSubjectMut = trpc.planner.deleteSubject.useMutation({ onSuccess: () => { trpcCtx.planner.subjects.invalidate(); trpcCtx.planner.schedules.invalidate(); trpcCtx.planner.tasks.invalidate(); trpcCtx.planner.checkins.invalidate(); }});
+  const clearAllSubjectsMut = trpc.planner.clearAllSubjects.useMutation({ onSuccess: () => { trpcCtx.planner.subjects.invalidate(); trpcCtx.planner.schedules.invalidate(); trpcCtx.planner.tasks.invalidate(); trpcCtx.planner.checkins.invalidate(); }});
   const createTaskMut = trpc.planner.createTask.useMutation({ onSuccess: () => trpcCtx.planner.tasks.invalidate() });
   const toggleTaskMut = trpc.planner.toggleTask.useMutation({ onSuccess: () => trpcCtx.planner.tasks.invalidate() });
   const deleteTaskMut = trpc.planner.deleteTask.useMutation({ onSuccess: () => trpcCtx.planner.tasks.invalidate() });
@@ -408,6 +414,16 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
   const importPlannerFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]; if (!file) return;
     event.target.value = "";
+    // Show import mode dialog
+    setImportModeFile(file);
+    setShowImportMode(true);
+  };
+
+  const executeImport = async (mode: "replace" | "merge") => {
+    const file = importModeFile;
+    setShowImportMode(false);
+    setImportModeFile(null);
+    if (!file) return;
     let parsed: ReturnType<typeof parsePlannerJson>;
     try {
       parsed = parsePlannerJson(JSON.parse(await file.text()), subjects.length);
@@ -415,12 +431,22 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
       toast.error(error instanceof Error ? error.message : "Could not read that planner JSON");
       return;
     }
-    // Import sequentially so each subject+schedules are created in order
+    // If replace mode, clear all subjects first
+    if (mode === "replace") {
+      await new Promise<void>((resolve) => {
+        clearAllSubjectsMut.mutate(undefined, {
+          onSuccess: () => { toast.info("Existing subjects cleared"); resolve(); },
+          onError: (err) => { toast.error(`Could not clear subjects: ${err.message}`); resolve(); },
+        });
+      });
+    }
+    // Import sequentially — use upsert for merge, create for replace
+    const mutation = mode === "merge" ? upsertSubjectMut : createSubjectMut;
     let successCount = 0;
     const errors: string[] = [];
     for (const sub of parsed) {
       await new Promise<void>((resolve) => {
-        createSubjectMut.mutate(
+        mutation.mutate(
           { name: sub.name, code: sub.code, color: sub.color, days: sub.days, startTime: sub.time, times: Object.fromEntries(Object.entries(sub.times).map(([k, v]) => [k, v])) },
           {
             onSuccess: () => { successCount += 1; resolve(); },
@@ -525,6 +551,7 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
           <button className={activeView === "library" ? "nav-item active" : "nav-item"} onClick={() => { setActiveView("library"); setMobileNav(false); }}><Library size={18} /> Library <span className="nav-count">{libraryBooks.length}</span></button>
           <button className={activeView === "attendance" ? "nav-item active" : "nav-item"} onClick={() => { setActiveView("attendance"); setMobileNav(false); }}><BarChart3 size={18} /> Attendance</button>
           <button className={activeView === "coding" ? "nav-item active" : "nav-item"} onClick={() => { setActiveView("coding"); setMobileNav(false); }}><Target size={18} /> Coding journey</button>
+          <button className={activeView === "calendar" ? "nav-item active" : "nav-item"} onClick={() => { setActiveView("calendar"); setMobileNav(false); }}><CalendarDays size={18} /> Calendar</button>
           <button className="nav-item" onClick={() => toast.info("Focus mode is ready for your next study block.")}><Timer size={18} /> Focus mode</button>
         </nav>
         <div className="sidebar-label subject-label">Your subjects <button aria-label="Add subject" onClick={() => setShowSubjectForm(true)}><Plus size={15} /></button></div>
@@ -546,7 +573,7 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
       <main className="main-content">
         <header className="topbar">
           <button className="mobile-menu" aria-label="Open navigation" onClick={() => setMobileNav(true)}><Menu size={21} /></button>
-          <div className="breadcrumbs"><span>Workspace</span><span>/</span><strong>{activeView === "today" ? "Today" : activeView === "planner" ? "Planner" : activeView === "library" ? "Library" : activeView === "attendance" ? "Attendance" : "Coding journey"}</strong></div>
+          <div className="breadcrumbs"><span>Workspace</span><span>/</span><strong>{activeView === "today" ? "Today" : activeView === "planner" ? "Planner" : activeView === "library" ? "Library" : activeView === "attendance" ? "Attendance" : activeView === "calendar" ? "Calendar" : "Coding journey"}</strong></div>
           <div className="topbar-actions">
             <button className="icon-button" aria-label="Settings" onClick={() => setShowSettings(true)}><Settings2 size={18} /></button>
             <button className="icon-button" aria-label="Search" onClick={() => toast.info("Search across your tasks is coming soon.")}><Search size={18} /></button>
@@ -599,8 +626,8 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
 
             <section className="stats-grid">
               <div className="stat-card progress-card"><div><p className="eyebrow">Daily progress</p><h3>{progress === 100 ? "Day complete" : `${openCount} tasks to go`}</h3><p className="muted">Keep your momentum going.</p></div><ProgressRing value={progress} /></div>
-              <div className="stat-card accent-card"><div className="stat-icon"><Flame size={19} /></div><p className="eyebrow">Current streak</p><strong className="stat-number">6 <small>days</small></strong><div className="stat-trend"><TrendingUp size={14} /> +2 from last week</div></div>
-              <div className="stat-card"><div className="stat-icon lavender"><Target size={19} /></div><p className="eyebrow">Weekly focus</p><strong className="stat-number">12.5 <small>hrs</small></strong><div className="stat-trend neutral"><Clock3 size={14} /> 3.5 hrs remaining</div></div>
+              <div className="stat-card accent-card"><div className="stat-icon"><Flame size={19} /></div><p className="eyebrow">Current streak</p><strong className="stat-number">{codingStats.streak} <small>days</small></strong><div className="stat-trend">{codingStats.streak > 0 ? <><TrendingUp size={14} /> Keep it going!</> : <>Start solving to build a streak</>}</div></div>
+              {(() => { const weekStart = new Date(); weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7)); weekStart.setHours(0,0,0,0); const weekCompleted = tasks.filter(t => t.completed && weekDays.some(d => d.dateStr === t.dueDate)).length; return <div className="stat-card"><div className="stat-icon lavender"><Target size={19} /></div><p className="eyebrow">Tasks this week</p><strong className="stat-number">{weekCompleted} <small>done</small></strong><div className="stat-trend neutral"><Clock3 size={14} /> {tasks.filter(t => !t.completed && weekDays.some(d => d.dateStr === t.dueDate)).length} remaining</div></div>; })()}
             </section>
 
             <div className="dashboard-grid">
@@ -618,7 +645,7 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
                 <section className="panel quote-panel"><div className="quote-mark">"</div><p>Consistency is not about perfection. It's about returning to what matters.</p><span>— your future self</span></section>
               </aside>
             </div>
-          </> : activeView === "planner" ? <PlannerView subjects={subjects} tasks={tasks} weekDays={weekDays} todayDate={todayDate} onAddSubject={() => setShowSubjectForm(true)} onAddTask={() => setShowTaskForm(true)} onImport={importPlannerFile} onImportCalendar={importCalendarJson} onDeleteSubject={(id) => { deleteSubjectMut.mutate({ subjectId: Number(id) }); toast.success("Subject removed"); }} events={calendarEvents} onAddEvent={(kind) => { setEventKind(kind); setShowEventForm(true); }} onRemoveEvent={(id) => deleteEventMut.mutate({ eventId: Number(id) })} /> : activeView === "library" ? <LibraryView books={libraryBooks} onAdd={() => setShowLibraryForm(true)} onRemove={(id) => { setLibraryBooks((current) => current.filter((book) => book.id !== id)); toast.success("Book removed"); }} /> : activeView === "attendance" ? <AttendanceView attendance={attendance} target={attendanceTarget} onTargetChange={setAttendanceTarget} onImport={importAttendanceCsv} /> : <CodingView stats={codingStats} onChange={() => toast.info("Settings saving is coming soon!")} />}
+          </> : activeView === "planner" ? <PlannerView subjects={subjects} tasks={tasks} weekDays={weekDays} todayDate={todayDate} onAddSubject={() => setShowSubjectForm(true)} onAddTask={() => setShowTaskForm(true)} onImport={importPlannerFile} onImportCalendar={importCalendarJson} onDeleteSubject={(id) => { deleteSubjectMut.mutate({ subjectId: Number(id) }); toast.success("Subject removed"); }} events={calendarEvents} onAddEvent={(kind) => { setEventKind(kind); setShowEventForm(true); }} onRemoveEvent={(id) => deleteEventMut.mutate({ eventId: Number(id) })} /> : activeView === "library" ? <LibraryView books={libraryBooks} onAdd={() => setShowLibraryForm(true)} onRemove={(id) => { setLibraryBooks((current) => current.filter((book) => book.id !== id)); toast.success("Book removed"); }} /> : activeView === "attendance" ? <AttendanceView attendance={attendance} target={attendanceTarget} onTargetChange={setAttendanceTarget} onImport={importAttendanceCsv} /> : activeView === "calendar" ? <CalendarGridView month={calMonth} year={calYear} onMonthChange={(m, y) => { setCalMonth(m); setCalYear(y); }} events={calendarEvents} onAddEvent={(kind, date) => { setEventKind(kind); setEventStart(date); setShowEventForm(true); }} onRemoveEvent={(id) => deleteEventMut.mutate({ eventId: Number(id) })} /> : <CodingView stats={codingStats} onChange={(updated) => { saveSettingsMut.mutate({ leetcodeTarget: updated.leetcodeTarget, codeforcesTarget: updated.codeforcesTarget }); }} />}
         </div>
       </main>
 
@@ -629,6 +656,8 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
       {showEventForm && <div className="modal-backdrop" onMouseDown={() => setShowEventForm(false)}><div className="modal-card" onMouseDown={(event) => event.stopPropagation()}><div className="modal-header"><div><p className="eyebrow coral">Planner calendar</p><h2>Add {eventKind === "dayoff" ? "a day off" : eventKind === "holiday" ? "a holiday" : "an exam"}</h2></div><button className="close-button" onClick={() => setShowEventForm(false)}><X size={19} /></button></div><form onSubmit={addCalendarEvent}><label>Title<input autoFocus value={eventTitle} onChange={(event) => setEventTitle(event.target.value)} placeholder={eventKind === "exam" ? "e.g. Digital Electronics Midterm" : "e.g. Diwali break"} /></label><div className="form-grid"><label>Starts<input type="date" value={eventStart} onChange={(event) => setEventStart(event.target.value)} /></label><label>Ends <span className="optional">for multi-day holidays</span><input type="date" value={eventEnd} onChange={(event) => setEventEnd(event.target.value)} /></label></div>{eventKind === "exam" && <><label>Exam subject <span className="optional">or type a custom subject</span><input value={eventSubject} onChange={(event) => setEventSubject(event.target.value)} placeholder="e.g. Advanced Algorithms" /></label><label>Exam time<input value={eventTime} onChange={(event) => setEventTime(event.target.value)} /></label><label className="recurring-toggle"><input type="checkbox" checked={afterExamClass} onChange={(event) => setAfterExamClass(event.target.checked)} /><span>Classes continue after the exam</span></label>{afterExamClass && <label>After-exam class subject<input value={afterExamSubject} onChange={(event) => setAfterExamSubject(event.target.value)} placeholder="e.g. Data Structures and Algorithms" /></label>}</>}<div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowEventForm(false)}>Cancel</button><button className="primary-button" type="submit" disabled={!eventTitle.trim() || !eventStart}>Add to planner <ArrowRight size={16} /></button></div></form></div></div>}
 
       {showSubjectForm && <div className="modal-backdrop" onMouseDown={() => setShowSubjectForm(false)}><div className="modal-card" onMouseDown={(event) => event.stopPropagation()}><div className="modal-header"><div><p className="eyebrow coral">Build your week</p><h2>Add a subject</h2></div><button className="close-button" onClick={() => setShowSubjectForm(false)}><X size={19} /></button></div><form onSubmit={addSubject}><label>Subject name<input autoFocus value={subjectName} onChange={(event) => setSubjectName(event.target.value)} placeholder="e.g. Creative Writing" /></label><label>Meets on</label><div className="day-selector">{weekDays.slice(0, 5).map((day, index) => <button type="button" key={day.label} className={subjectDays.includes(index + 1) ? "day-select selected" : "day-select"} onClick={() => toggleSubjectDay(index + 1)}>{day.label}</button>)}</div><label>Class time<input type="time" value={subjectTime.replace(/ (AM|PM)$/i, "").replace(/^(\d):/, "0$1:")} onChange={(event) => { const [h, m] = event.target.value.split(":").map(Number); const period = h >= 12 ? "PM" : "AM"; const hour12 = h % 12 || 12; setSubjectTime(`${String(hour12).padStart(2, "0")}:${String(m).padStart(2, "0")} ${period}`); }} /></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowSubjectForm(false)}>Cancel</button><button className="primary-button" type="submit" disabled={!subjectName.trim() || subjectDays.length === 0}>Add subject <ArrowRight size={16} /></button></div></form></div></div>}
+
+      {showImportMode && <div className="modal-backdrop" onMouseDown={() => { setShowImportMode(false); setImportModeFile(null); }}><div className="modal-card" onMouseDown={(e) => e.stopPropagation()}><div className="modal-header"><div><p className="eyebrow coral">Import options</p><h2>How should we import?</h2></div><button className="close-button" onClick={() => { setShowImportMode(false); setImportModeFile(null); }}><X size={19} /></button></div><p style={{ padding: "0 24px", color: "var(--text-muted, #aaa)", fontSize: 14, lineHeight: 1.6 }}>Choose whether to replace your existing subjects or merge the imported ones with your current planner.</p><div className="modal-actions" style={{ flexDirection: "column", gap: 10 }}><button className="primary-button" style={{ width: "100%", justifyContent: "center" }} onClick={() => executeImport("merge")}><RefreshCw size={16} /> Add / Merge — keep existing, update matches</button><button className="secondary-button" style={{ width: "100%", justifyContent: "center", color: "#ef4444" }} onClick={() => executeImport("replace")}><Trash2 size={16} /> Replace all — clear everything and import fresh</button></div></div></div>}
 
       <SettingsModal open={showSettings} onClose={() => setShowSettings(false)} leetcodeUsername={leetcodeUsername} codeforcesHandle={codeforcesHandle} onSave={(lc, cf) => { saveSettingsMut.mutate({ leetcodeUsername: lc, codeforcesHandle: cf }); }} />
       <ProfilePanel open={showProfile} onClose={() => setShowProfile(false)} user={user} onLogout={onLogout} subjectsCount={subjects.length} tasksCount={tasks.length} />
@@ -731,5 +760,154 @@ function AttendanceView({ attendance, target, onTargetChange, onImport }: { atte
     <section className="attendance-stats"><div className="stat-card"><p className="eyebrow">Overall attendance</p><strong className="stat-number">{overall.toFixed(1)}<small>%</small></strong><div className="stat-trend neutral">{totalPresent} present of {totalClasses} classes</div></div><div className="stat-card accent-card"><p className="eyebrow">Target percentage</p><strong className="stat-number">{target}<small>%</small></strong><div className="stat-trend">{atRisk} subjects need attention</div></div><div className="stat-card"><p className="eyebrow">Imported records</p><strong className="stat-number">{totalClasses}<small> classes</small></strong><div className="stat-trend neutral">{attendance.length} subjects from report</div></div></section>
     <section className="panel attendance-panel"><SectionTitle eyebrow="Subject-by-subject forecast" title="Your attendance runway" action={<span className="attendance-legend"><i className="legend-good" /> on track <i className="legend-risk" /> action needed</span>} /><div className="attendance-table"><div className="attendance-head"><span>Subject</span><span>Current</span><span>Present / total</span><span>To reach {target}%</span><span>Can miss</span></div>{attendance.map((item) => { const math = getAttendanceMath(item, target); const good = math.percentage >= target; return <div className="attendance-row" key={item.code}><div className="attendance-subject"><span className={`attendance-status ${good ? "good" : "risk"}`} /><div><strong>{item.name}</strong><small>{item.code} · {item.type} · {item.hoursPresent + item.hoursAbsent} hours</small></div></div><strong className={good ? "attendance-percent good-text" : "attendance-percent risk-text"}>{math.percentage.toFixed(1)}%</strong><span className="attendance-count">{item.present} / {math.total}</span><span className={`attendance-action ${good ? "good-box" : "risk-box"}`}>{good ? "Already there" : `${math.classesNeeded} more ${math.classesNeeded === 1 ? "class" : "classes"}`}</span><span className="attendance-skip">{good ? `${math.classesCanSkip} ${math.classesCanSkip === 1 ? "class" : "classes"}` : "0 classes"}</span></div>; })}</div></section>
     <section className="attendance-explainer"><div className="smart-panel-icon"><BarChart3 size={20} /></div><div><p className="eyebrow">How to read this</p><h3>Attend every "more classes" number before taking a break.</h3><p>For example, at a 75% target, 15 present out of 21 classes means you need to attend the next 3 classes to reach 75%. Once you are on track, "Can miss" shows the maximum future absences before falling below your target.</p></div></section>
+  </>;
+}
+
+// ─── Calendar Grid View ──────────────────────────────────────────────
+type GoogleCalEvent = { id: string; title: string; start: string; end: string; kind: "google"; allDay: boolean; time?: string };
+
+function CalendarGridView({ month, year, onMonthChange, events, onAddEvent, onRemoveEvent }: {
+  month: number; year: number;
+  onMonthChange: (month: number, year: number) => void;
+  events: CalendarEvent[];
+  onAddEvent: (kind: CalendarEvent["kind"], date: string) => void;
+  onRemoveEvent: (id: string) => void;
+}) {
+  const monthLabel = new Date(year, month).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const startDow = (firstDay.getDay() + 6) % 7; // Mon=0
+  const daysInMonth = lastDay.getDate();
+  const todayStr = getTodayString();
+
+  // Google Calendar integration
+  const timeMin = `${year}-${String(month + 1).padStart(2, "0")}-01T00:00:00Z`;
+  const nextMonth = month === 11 ? 0 : month + 1;
+  const nextYear = month === 11 ? year + 1 : year;
+  const timeMax = `${nextYear}-${String(nextMonth + 1).padStart(2, "0")}-01T00:00:00Z`;
+
+  const { data: gcalStatus } = trpc.googleCalendar.connected.useQuery();
+  const { data: gcalData } = trpc.googleCalendar.events.useQuery(
+    { timeMin, timeMax },
+    { enabled: !!gcalStatus?.connected, staleTime: 5 * 60 * 1000, retry: 1 }
+  );
+
+  const googleEvents: GoogleCalEvent[] = useMemo(() => gcalData?.events ?? [], [gcalData]);
+
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < startDow; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const dateStr = (d: number) => `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  const localEventsForDate = (d: number) => {
+    const ds = dateStr(d);
+    return events.filter(e => ds >= e.start && ds <= e.end);
+  };
+  const googleEventsForDate = (d: number) => {
+    const ds = dateStr(d);
+    return googleEvents.filter(e => ds >= e.start && ds <= e.end);
+  };
+  const allEventsForDate = (d: number) => [...localEventsForDate(d), ...googleEventsForDate(d)];
+
+  const prev = () => { if (month === 0) onMonthChange(11, year - 1); else onMonthChange(month - 1, year); };
+  const next = () => { if (month === 11) onMonthChange(0, year + 1); else onMonthChange(month + 1, year); };
+
+  const [selectedDate, setSelectedDate] = useState<number | null>(null);
+  const selectedLocal = selectedDate ? localEventsForDate(selectedDate) : [];
+  const selectedGoogle = selectedDate ? googleEventsForDate(selectedDate) : [];
+  const selectedStr = selectedDate ? dateStr(selectedDate) : "";
+
+  return <>
+    <section className="hero-row"><div><p className="eyebrow coral">PLAN YOUR SEMESTER</p><h1>Calendar</h1><p className="hero-subtitle">See your holidays, exams, and events at a glance.</p></div>
+      <div className="hero-actions">
+        <button className="secondary-button" onClick={() => onAddEvent("holiday", todayStr)}><Plus size={17} /> Holiday</button>
+        <button className="primary-button" onClick={() => onAddEvent("exam", todayStr)}><Plus size={17} /> Exam</button>
+      </div>
+    </section>
+
+    {gcalStatus && !gcalStatus.connected && <section className="panel smart-panel" style={{ marginBottom: 16 }}>
+      <div className="smart-panel-icon"><CalendarDays size={20} /></div>
+      <div><p className="eyebrow">Google Calendar</p><h3>Connect your Google Calendar</h3><p>Log out and sign in again to grant calendar access. Your Google events will appear alongside Daymark events.</p></div>
+      <button className="secondary-button" onClick={() => window.location.href = "/api/auth/google"}>Re-authorize <ArrowRight size={16} /></button>
+    </section>}
+
+    {gcalData?.error && <section className="panel smart-panel" style={{ marginBottom: 16, borderLeft: "3px solid #ef4444" }}>
+      <div className="smart-panel-icon" style={{ color: "#ef4444" }}><CalendarDays size={20} /></div>
+      <div><p className="eyebrow" style={{ color: "#ef4444" }}>Google Calendar issue</p><p>{gcalData.error}</p></div>
+      {gcalData.error.includes("re-login") && <button className="secondary-button" onClick={() => window.location.href = "/api/auth/google"}>Re-authorize <ArrowRight size={16} /></button>}
+    </section>}
+
+    <section className="panel calendar-grid-panel">
+      <div className="calendar-nav">
+        <button className="icon-button" onClick={prev} aria-label="Previous month"><ChevronLeft size={20} /></button>
+        <h2>{monthLabel}</h2>
+        <button className="icon-button" onClick={next} aria-label="Next month"><ChevronRight size={20} /></button>
+      </div>
+
+      <div className="calendar-grid">
+        <div className="calendar-header"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>
+        <div className="calendar-body">
+          {cells.map((d, i) => {
+            if (d === null) return <div className="calendar-cell empty" key={`e-${i}`} />;
+            const ds = dateStr(d);
+            const allEvents = allEventsForDate(d);
+            const isToday = ds === todayStr;
+            const isSelected = d === selectedDate;
+            return (
+              <button className={`calendar-cell ${isToday ? "today" : ""} ${isSelected ? "selected" : ""} ${allEvents.length ? "has-events" : ""}`} key={d} onClick={() => setSelectedDate(d === selectedDate ? null : d)}>
+                <span className="cal-day-num">{d}</span>
+                {allEvents.length > 0 && <div className="cal-dots">
+                  {allEvents.slice(0, 3).map(e => <span key={e.id} className={`cal-dot ${e.kind}`} />)}
+                </div>}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="calendar-legend">
+        <span><i className="cal-dot holiday" /> Holiday</span>
+        <span><i className="cal-dot exam" /> Exam</span>
+        <span><i className="cal-dot dayoff" /> Day off</span>
+        {gcalStatus?.connected && <span><i className="cal-dot google" /> Google</span>}
+      </div>
+    </section>
+
+    {selectedDate && <section className="panel calendar-detail-panel">
+      <SectionTitle eyebrow={selectedStr} title={new Date(`${selectedStr}T12:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })} action={
+        <div className="event-actions">
+          <button className="secondary-button" onClick={() => onAddEvent("dayoff", selectedStr)}>Day off</button>
+          <button className="secondary-button" onClick={() => onAddEvent("holiday", selectedStr)}>Holiday</button>
+          <button className="primary-button" onClick={() => onAddEvent("exam", selectedStr)}>Add exam</button>
+        </div>
+      } />
+      {(selectedLocal.length > 0 || selectedGoogle.length > 0) ? <div className="event-list">
+        {selectedLocal.map(e => (
+          <div className="event-row" key={e.id}>
+            <span className={`event-kind ${e.kind}`}>{e.kind === "exam" ? "EXAM" : e.kind === "holiday" ? "HOLIDAY" : "DAY OFF"}</span>
+            <div><strong>{e.title}</strong><small>{e.start}{e.end !== e.start ? ` → ${e.end}` : ""}{e.subject ? ` · ${e.subject}` : ""}</small></div>
+            <button className="row-menu" onClick={() => onRemoveEvent(e.id)}><Trash2 size={15} /></button>
+          </div>
+        ))}
+        {selectedGoogle.map(e => (
+          <div className="event-row" key={e.id}>
+            <span className="event-kind google">GOOGLE</span>
+            <div><strong>{e.title}</strong><small>{e.time || "All day"}</small></div>
+          </div>
+        ))}
+      </div> : <div className="class-empty" style={{ padding: "20px 0" }}><CalendarDays size={18} /><span>No events on this date — add one above.</span></div>}
+    </section>}
+
+    {events.length > 0 && <section className="panel calendar-events-panel">
+      <SectionTitle eyebrow="All events" title="Upcoming events" />
+      <div className="event-list">{events.map(e => (
+        <div className="event-row" key={e.id}>
+          <span className={`event-kind ${e.kind}`}>{e.kind === "exam" ? "EXAM" : e.kind === "holiday" ? "HOLIDAY" : "DAY OFF"}</span>
+          <div><strong>{e.title}</strong><small>{e.start}{e.end !== e.start ? ` → ${e.end}` : ""}{e.subject ? ` · ${e.subject}` : ""}</small></div>
+          <button className="row-menu" onClick={() => onRemoveEvent(e.id)}><Trash2 size={15} /></button>
+        </div>
+      ))}</div>
+    </section>}
   </>;
 }

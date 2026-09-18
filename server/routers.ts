@@ -7,6 +7,7 @@ import {
   createSubject, createTask, deleteTask, listSchedules, listSubjects, listTasks, updateTask,
   deleteSubject, listCalendarEvents, createCalendarEvent, bulkCreateCalendarEvents, deleteCalendarEvent,
   listCheckins, upsertCheckin, getCodingSettings, upsertCodingSettings, createSchedules,
+  upsertSubjectByName, deleteSchedulesForSubject, clearAllSubjects,
 } from "./db";
 import { getFullLeetCodeData } from "./services/leetcode";
 import { getFullCodeforcesData, getUpcomingContests } from "./services/codeforces";
@@ -37,6 +38,20 @@ export const appRouter = router({
       return { subjectId, days: input.days };
     }),
     deleteSubject: protectedProcedure.input(z.object({ subjectId: z.number().int().positive() })).mutation(({ ctx, input }) => deleteSubject(input.subjectId, ctx.user.id)),
+    upsertSubject: protectedProcedure.input(z.object({ name: z.string().min(1).max(120), code: z.string().max(40).optional(), color: z.string().max(20).optional(), days: z.array(daySchema).min(1), startTime: z.string().max(10).optional(), times: z.record(z.string(), z.string().max(10)).optional() })).mutation(async ({ ctx, input }) => {
+      const subjectId = await upsertSubjectByName({ name: input.name, code: input.code, color: input.color, userId: ctx.user.id });
+      // Clear old schedules and re-create
+      await deleteSchedulesForSubject(subjectId);
+      await createSchedules(input.days.map(day => {
+        const t: string | undefined = input.times?.[String(day)] ?? input.startTime ?? undefined;
+        return { subjectId, dayOfWeek: day, startTime: t, userId: ctx.user.id };
+      }));
+      return { subjectId, days: input.days };
+    }),
+    clearAllSubjects: protectedProcedure.mutation(async ({ ctx }) => {
+      await clearAllSubjects(ctx.user.id);
+      return { success: true };
+    }),
     createTask: protectedProcedure.input(z.object({ title: z.string().min(1).max(255), subjectId: z.number().int().positive().optional(), dueDate: z.string().date().nullable().optional(), priority: z.enum(["High", "Medium", "Low"]).default("Medium"), recurringDays: z.array(z.number().int().min(1).max(6)).default([]) })).mutation(async ({ ctx, input }) => {
       const taskId = await createTask({ title: input.title, subjectId: input.subjectId, dueDate: input.dueDate || null, priority: input.priority, recurringDays: input.recurringDays.join(","), userId: ctx.user.id });
       return { taskId };
@@ -81,7 +96,7 @@ export const appRouter = router({
   }),
   coding: router({
     getSettings: protectedProcedure.query(({ ctx }) => getCodingSettings(ctx.user.id)),
-    saveSettings: protectedProcedure.input(z.object({ leetcodeUsername: z.string().optional(), codeforcesHandle: z.string().optional() })).mutation(({ ctx, input }) => upsertCodingSettings(ctx.user.id, input)),
+    saveSettings: protectedProcedure.input(z.object({ leetcodeUsername: z.string().optional(), codeforcesHandle: z.string().optional(), leetcodeTarget: z.number().int().min(0).optional(), codeforcesTarget: z.number().int().min(0).optional() })).mutation(({ ctx, input }) => upsertCodingSettings(ctx.user.id, input)),
     leetcodeProfile: publicProcedure.input(z.object({ username: z.string().min(1) })).query(async ({ input }) => {
       return getFullLeetCodeData(input.username);
     }),
@@ -90,6 +105,47 @@ export const appRouter = router({
     }),
     upcomingContests: publicProcedure.query(async () => {
       return getUpcomingContests();
+    }),
+  }),
+  googleCalendar: router({
+    connected: protectedProcedure.query(async ({ ctx }) => {
+      return { connected: !!ctx.user.googleAccessToken };
+    }),
+    events: protectedProcedure.input(z.object({
+      timeMin: z.string(),
+      timeMax: z.string(),
+    })).query(async ({ ctx, input }) => {
+      const token = ctx.user.googleAccessToken;
+      if (!token) return { events: [], connected: false };
+      try {
+        const url = new URL("https://www.googleapis.com/calendar/v3/calendars/primary/events");
+        url.searchParams.set("timeMin", input.timeMin);
+        url.searchParams.set("timeMax", input.timeMax);
+        url.searchParams.set("singleEvents", "true");
+        url.searchParams.set("orderBy", "startTime");
+        url.searchParams.set("maxResults", "100");
+        const res = await fetch(url.toString(), {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          console.warn("[GoogleCalendar] API error:", res.status, await res.text().catch(() => ""));
+          return { events: [], connected: true, error: res.status === 401 ? "Token expired — please re-login" : "Could not fetch events" };
+        }
+        const data = await res.json() as { items?: any[] };
+        const events = (data.items ?? []).map((item: any) => ({
+          id: `gcal-${item.id}`,
+          title: item.summary || "Untitled",
+          start: item.start?.date || item.start?.dateTime?.split("T")[0] || "",
+          end: item.end?.date || item.end?.dateTime?.split("T")[0] || "",
+          kind: "google" as const,
+          allDay: !!item.start?.date,
+          time: item.start?.dateTime ? new Date(item.start.dateTime).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : undefined,
+        }));
+        return { events, connected: true };
+      } catch (err) {
+        console.error("[GoogleCalendar] Fetch error:", err);
+        return { events: [], connected: true, error: "Network error" };
+      }
     }),
   }),
 });

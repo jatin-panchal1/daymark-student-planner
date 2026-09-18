@@ -92,6 +92,7 @@ export function registerGoogleAuthRoutes(app: Express) {
       const devUser: Parameters<typeof createSessionToken>[0] = {
         id: 1, openId: "dev_local_user", name: "Dev Student", email: "dev@daymark.local",
         avatarUrl: null, role: "admin", loginMethod: "dev",
+        googleAccessToken: null, googleRefreshToken: null,
         createdAt: new Date(), updatedAt: new Date(), lastSignedIn: new Date(),
       };
       const sessionToken = await createSessionToken(devUser);
@@ -102,7 +103,7 @@ export function registerGoogleAuthRoutes(app: Express) {
     }
 
     const redirectUri = getRedirectUri(req);
-    const scope = "openid email profile";
+    const scope = "openid email profile https://www.googleapis.com/auth/calendar.events.readonly";
     const state = Buffer.from(JSON.stringify({ returnTo: req.query.returnTo || "/" })).toString("base64url");
 
     const url = new URL(GOOGLE_AUTH_URL);
@@ -149,7 +150,7 @@ export function registerGoogleAuthRoutes(app: Express) {
         return res.status(400).json({ error: "Failed to exchange authorization code" });
       }
 
-      const tokenData = (await tokenResponse.json()) as { access_token: string; id_token?: string };
+      const tokenData = (await tokenResponse.json()) as { access_token: string; refresh_token?: string; id_token?: string };
 
       // Get user info from Google
       const userInfoResponse = await fetch(GOOGLE_USERINFO_URL, {
@@ -178,6 +179,8 @@ export function registerGoogleAuthRoutes(app: Express) {
           avatarUrl: googleUser.picture,
           loginMethod: "google",
           lastSignedIn: new Date(),
+          googleAccessToken: tokenData.access_token,
+          googleRefreshToken: tokenData.refresh_token ?? undefined,
         });
         user = (await getUserByOpenId(openId)) || null;
       } catch (err) {

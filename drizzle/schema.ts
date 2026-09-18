@@ -1,4 +1,4 @@
-import { boolean, date, index, integer, pgTable, text, timestamp, varchar } from "drizzle-orm/pg-core";
+import { boolean, date, index, integer, pgTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
@@ -8,6 +8,8 @@ export const users = pgTable("users", {
   avatarUrl: text("avatarUrl"),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: varchar("role", { length: 16 }).default("user").notNull(),
+  googleAccessToken: text("googleAccessToken"),
+  googleRefreshToken: text("googleRefreshToken"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -20,7 +22,7 @@ export const subjects = pgTable("subjects", {
   color: varchar("color", { length: 20 }),
   userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-}, (table) => ({ userIdx: index("subjects_user_idx").on(table.userId) }));
+}, (table) => ({ userIdx: index("subjects_user_idx").on(table.userId), nameUserUniq: uniqueIndex("subjects_name_user_uniq").on(table.name, table.userId) }));
 
 export const schedules = pgTable("schedule", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
@@ -79,6 +81,8 @@ export const codingSettings = pgTable("codingSettings", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   leetcodeUsername: varchar("leetcodeUsername", { length: 100 }),
   codeforcesHandle: varchar("codeforcesHandle", { length: 100 }),
+  leetcodeTarget: integer("leetcodeTarget").default(150).notNull(),
+  codeforcesTarget: integer("codeforcesTarget").default(200).notNull(),
   userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }).unique(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });

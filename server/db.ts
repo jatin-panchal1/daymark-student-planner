@@ -32,7 +32,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   if (!db) return;
   const values: InsertUser = { openId: user.openId };
   const updateSet: Record<string, unknown> = {};
-  (['name', 'email', 'loginMethod', 'avatarUrl'] as const).forEach((field) => {
+  (['name', 'email', 'loginMethod', 'avatarUrl', 'googleAccessToken', 'googleRefreshToken'] as const).forEach((field) => {
     if (user[field] !== undefined) { values[field] = user[field] ?? null; updateSet[field] = user[field] ?? null; }
   });
   if (user.lastSignedIn !== undefined) { values.lastSignedIn = user.lastSignedIn; updateSet.lastSignedIn = user.lastSignedIn; }
@@ -68,10 +68,28 @@ export async function createSubject(data: InsertSubject) {
   return result[0].id;
 }
 
+export async function upsertSubjectByName(data: InsertSubject) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const result = await db.insert(subjects).values(data)
+    .onConflictDoUpdate({
+      target: [subjects.name, subjects.userId],
+      set: { code: data.code, color: data.color },
+    })
+    .returning({ id: subjects.id });
+  return result[0].id;
+}
+
 export async function deleteSubject(subjectId: number, userId: number) {
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
   await db.delete(subjects).where(and(eq(subjects.id, subjectId), eq(subjects.userId, userId)));
+}
+
+export async function clearAllSubjects(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  await db.delete(subjects).where(eq(subjects.userId, userId));
 }
 
 // ──────────────────────────────────────────────
@@ -89,6 +107,12 @@ export async function createSchedules(data: InsertSchedule[]) {
   if (!db) throw new Error("Database is not available");
   if (data.length === 0) return;
   await db.insert(schedules).values(data);
+}
+
+export async function deleteSchedulesForSubject(subjectId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  await db.delete(schedules).where(eq(schedules.subjectId, subjectId));
 }
 
 // ──────────────────────────────────────────────
@@ -192,12 +216,17 @@ export async function getCodingSettings(userId: number) {
   return result[0] ?? null;
 }
 
-export async function upsertCodingSettings(userId: number, data: { leetcodeUsername?: string; codeforcesHandle?: string }) {
+export async function upsertCodingSettings(userId: number, data: { leetcodeUsername?: string; codeforcesHandle?: string; leetcodeTarget?: number; codeforcesTarget?: number }) {
   const db = await getDb();
   if (!db) throw new Error("Database is not available");
   const existing = await db.select().from(codingSettings).where(eq(codingSettings.userId, userId)).limit(1);
+  const updateData: Record<string, unknown> = { updatedAt: new Date() };
+  if (data.leetcodeUsername !== undefined) updateData.leetcodeUsername = data.leetcodeUsername;
+  if (data.codeforcesHandle !== undefined) updateData.codeforcesHandle = data.codeforcesHandle;
+  if (data.leetcodeTarget !== undefined) updateData.leetcodeTarget = data.leetcodeTarget;
+  if (data.codeforcesTarget !== undefined) updateData.codeforcesTarget = data.codeforcesTarget;
   if (existing.length > 0) {
-    await db.update(codingSettings).set({ ...data, updatedAt: new Date() }).where(eq(codingSettings.userId, userId));
+    await db.update(codingSettings).set(updateData).where(eq(codingSettings.userId, userId));
   } else {
     await db.insert(codingSettings).values({ userId, ...data });
   }
