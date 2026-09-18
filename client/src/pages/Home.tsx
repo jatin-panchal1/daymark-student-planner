@@ -320,16 +320,85 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
 
   const createSubjectMut = trpc.planner.createSubject.useMutation({ onSuccess: () => { trpcCtx.planner.subjects.invalidate(); trpcCtx.planner.schedules.invalidate(); }});
   const upsertSubjectMut = trpc.planner.upsertSubject.useMutation({ onSuccess: () => { trpcCtx.planner.subjects.invalidate(); trpcCtx.planner.schedules.invalidate(); }});
-  const deleteSubjectMut = trpc.planner.deleteSubject.useMutation({ onSuccess: () => { trpcCtx.planner.subjects.invalidate(); trpcCtx.planner.schedules.invalidate(); trpcCtx.planner.tasks.invalidate(); trpcCtx.planner.checkins.invalidate(); }});
   const clearAllSubjectsMut = trpc.planner.clearAllSubjects.useMutation({ onSuccess: () => { trpcCtx.planner.subjects.invalidate(); trpcCtx.planner.schedules.invalidate(); trpcCtx.planner.tasks.invalidate(); trpcCtx.planner.checkins.invalidate(); }});
   const createTaskMut = trpc.planner.createTask.useMutation({ onSuccess: () => trpcCtx.planner.tasks.invalidate() });
-  const toggleTaskMut = trpc.planner.toggleTask.useMutation({ onSuccess: () => trpcCtx.planner.tasks.invalidate() });
-  const deleteTaskMut = trpc.planner.deleteTask.useMutation({ onSuccess: () => trpcCtx.planner.tasks.invalidate() });
-  const markCheckinMut = trpc.planner.checkIn.useMutation({ onSuccess: () => trpcCtx.planner.checkins.invalidate() });
   const createEventMut = trpc.planner.createEvent.useMutation({ onSuccess: () => trpcCtx.planner.events.invalidate() });
   const importEventsMut = trpc.planner.importEvents.useMutation({ onSuccess: () => trpcCtx.planner.events.invalidate() });
-  const deleteEventMut = trpc.planner.deleteEvent.useMutation({ onSuccess: () => trpcCtx.planner.events.invalidate() });
-  const saveSettingsMut = trpc.coding.saveSettings.useMutation({ onSuccess: () => trpcCtx.coding.getSettings.invalidate() });
+
+  // ── Optimistic: Delete Subject ──
+  const deleteSubjectMut = trpc.planner.deleteSubject.useMutation({
+    onMutate: async (input) => {
+      await trpcCtx.planner.subjects.cancel();
+      const prev = trpcCtx.planner.subjects.getData();
+      trpcCtx.planner.subjects.setData(undefined, (old) => old?.filter(s => s.id !== input.subjectId) ?? []);
+      return { prev };
+    },
+    onError: (_err, _input, ctx) => { if (ctx?.prev) trpcCtx.planner.subjects.setData(undefined, ctx.prev); toast.error("Failed to delete subject"); },
+    onSettled: () => { trpcCtx.planner.subjects.invalidate(); trpcCtx.planner.schedules.invalidate(); trpcCtx.planner.tasks.invalidate(); trpcCtx.planner.checkins.invalidate(); },
+  });
+
+  // ── Optimistic: Toggle Task ──
+  const toggleTaskMut = trpc.planner.toggleTask.useMutation({
+    onMutate: async (input) => {
+      await trpcCtx.planner.tasks.cancel();
+      const prev = trpcCtx.planner.tasks.getData();
+      trpcCtx.planner.tasks.setData(undefined, (old) => old?.map(t => t.id === input.taskId ? { ...t, isCompleted: !t.isCompleted } : t) ?? []);
+      return { prev };
+    },
+    onError: (_err, _input, ctx) => { if (ctx?.prev) trpcCtx.planner.tasks.setData(undefined, ctx.prev); toast.error("Failed to update task"); },
+    onSettled: () => trpcCtx.planner.tasks.invalidate(),
+  });
+
+  // ── Optimistic: Delete Task ──
+  const deleteTaskMut = trpc.planner.deleteTask.useMutation({
+    onMutate: async (input) => {
+      await trpcCtx.planner.tasks.cancel();
+      const prev = trpcCtx.planner.tasks.getData();
+      trpcCtx.planner.tasks.setData(undefined, (old) => old?.filter(t => t.id !== input.taskId) ?? []);
+      return { prev };
+    },
+    onError: (_err, _input, ctx) => { if (ctx?.prev) trpcCtx.planner.tasks.setData(undefined, ctx.prev); toast.error("Failed to delete task"); },
+    onSettled: () => trpcCtx.planner.tasks.invalidate(),
+  });
+
+  // ── Optimistic: Check-in ──
+  const markCheckinMut = trpc.planner.checkIn.useMutation({
+    onMutate: async (input) => {
+      await trpcCtx.planner.checkins.cancel();
+      const prev = trpcCtx.planner.checkins.getData({ date: input.checkinDate });
+      trpcCtx.planner.checkins.setData({ date: input.checkinDate }, (old) => {
+        const filtered = old?.filter(c => c.subjectId !== input.subjectId) ?? [];
+        return [...filtered, { id: -1, subjectId: input.subjectId, checkinDate: input.checkinDate, status: input.status, userId: 0, createdAt: new Date() }];
+      });
+      return { prev, date: input.checkinDate };
+    },
+    onError: (_err, _input, ctx) => { if (ctx?.prev) trpcCtx.planner.checkins.setData({ date: ctx.date }, ctx.prev); toast.error("Failed to save check-in"); },
+    onSettled: (_d, _e, input) => trpcCtx.planner.checkins.invalidate({ date: input.checkinDate }),
+  });
+
+  // ── Optimistic: Delete Event ──
+  const deleteEventMut = trpc.planner.deleteEvent.useMutation({
+    onMutate: async (input) => {
+      await trpcCtx.planner.events.cancel();
+      const prev = trpcCtx.planner.events.getData();
+      trpcCtx.planner.events.setData(undefined, (old) => old?.filter(e => e.id !== input.eventId) ?? []);
+      return { prev };
+    },
+    onError: (_err, _input, ctx) => { if (ctx?.prev) trpcCtx.planner.events.setData(undefined, ctx.prev); toast.error("Failed to delete event"); },
+    onSettled: () => trpcCtx.planner.events.invalidate(),
+  });
+
+  // ── Optimistic: Save Coding Settings ──
+  const saveSettingsMut = trpc.coding.saveSettings.useMutation({
+    onMutate: async (input) => {
+      await trpcCtx.coding.getSettings.cancel();
+      const prev = trpcCtx.coding.getSettings.getData();
+      trpcCtx.coding.getSettings.setData(undefined, (old) => old ? { ...old, ...input } : old);
+      return { prev };
+    },
+    onError: (_err, _input, ctx) => { if (ctx?.prev) trpcCtx.coding.getSettings.setData(undefined, ctx.prev); toast.error("Failed to save settings"); },
+    onSettled: () => trpcCtx.coding.getSettings.invalidate(),
+  });
 
   // Re-evaluate attendance button states every minute
   useEffect(() => {
@@ -786,10 +855,10 @@ function CalendarGridView({ month, year, onMonthChange, events, onAddEvent, onRe
   const nextYear = month === 11 ? year + 1 : year;
   const timeMax = `${nextYear}-${String(nextMonth + 1).padStart(2, "0")}-01T00:00:00Z`;
 
-  const { data: gcalStatus } = trpc.googleCalendar.connected.useQuery();
+  const { data: gcalStatus } = trpc.googleCalendar.connected.useQuery(undefined, { staleTime: 10 * 60 * 1000, retry: false });
   const { data: gcalData } = trpc.googleCalendar.events.useQuery(
     { timeMin, timeMax },
-    { enabled: !!gcalStatus?.connected, staleTime: 5 * 60 * 1000, retry: 1 }
+    { enabled: !!gcalStatus?.connected, staleTime: 10 * 60 * 1000, retry: false, refetchOnWindowFocus: false }
   );
 
   const googleEvents: GoogleCalEvent[] = useMemo(() => gcalData?.events ?? [], [gcalData]);
