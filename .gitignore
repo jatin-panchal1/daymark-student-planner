@@ -116,6 +116,6 @@ client/public/__manus__/version.json
 # Vercel
 .vercel
 *.zip
-api/index.mjs
+
 
 .env*
