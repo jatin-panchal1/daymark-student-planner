@@ -6,6 +6,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
 import { useEffect, useState } from "react";
 
 export type AuthUser = {
@@ -78,6 +79,7 @@ function Router({ user, logout }: { user: AuthUser | null; logout: () => void })
   return (
     <Switch>
       <Route path="/login" component={Login} />
+      <Route path="/privacy" component={PrivacyPolicy} />
       <Route path="/">
         <AuthGuard user={user} loading={false}>
           <Home user={user!} onLogout={logout} />

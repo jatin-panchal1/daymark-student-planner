@@ -551,3 +551,108 @@ h3 { font-size: 17px; }
   text-align: center;
 }
 
+/* ─── Login Features List ────────────────────────── */
+.login-features {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 28px;
+  text-align: left;
+}
+.login-features li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  font-size: 13px;
+  color: var(--ink);
+}
+.login-features li svg { flex-shrink: 0; }
+.login-privacy-link {
+  color: var(--coral);
+  text-decoration: none;
+  font-weight: 500;
+  transition: color .15s;
+}
+.login-privacy-link:hover { color: var(--coral-dark); text-decoration: underline; }
+
+/* ─── Privacy Policy Page ────────────────────────── */
+.policy-page {
+  min-height: 100vh;
+  background: var(--paper);
+  padding: 24px;
+}
+.policy-container {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 32px 0 64px;
+}
+.policy-nav { margin-bottom: 40px; }
+.policy-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+  transition: color .15s;
+}
+.policy-back:hover { color: var(--ink); }
+.policy-header { margin-bottom: 40px; }
+.policy-header h1 {
+  font-family: Fraunces, serif;
+  font-size: 32px;
+  letter-spacing: -.03em;
+  margin: 8px 0 0;
+}
+.policy-updated {
+  color: var(--muted);
+  font-size: 12px;
+  font-family: 'DM Mono', monospace;
+  margin-top: 8px;
+}
+.policy-content section {
+  margin-bottom: 32px;
+}
+.policy-content h2 {
+  font-family: Fraunces, serif;
+  font-size: 18px;
+  letter-spacing: -.01em;
+  margin: 0 0 12px;
+  color: var(--ink);
+}
+.policy-content p {
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--ink);
+  margin: 0 0 12px;
+}
+.policy-content ul {
+  padding-left: 20px;
+  margin: 0 0 12px;
+}
+.policy-content li {
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+.policy-content a {
+  color: var(--coral);
+  text-decoration: none;
+  font-weight: 500;
+}
+.policy-content a:hover { text-decoration: underline; }
+.policy-contact {
+  background: var(--surface);
+  padding: 16px 20px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+}
+.policy-footer {
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}

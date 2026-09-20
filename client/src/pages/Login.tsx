@@ -1,3 +1,5 @@
+import { Link } from "wouter";
+
 export default function Login() {
   return (
     <div className="login-page">
@@ -16,10 +18,30 @@ export default function Login() {
 
         <div className="login-body">
           <p className="eyebrow coral">WELCOME</p>
-          <h1>Sign in to your planner</h1>
+          <h1>Your calm student planner</h1>
           <p className="login-subtitle">
-            One calm space for classes, tasks, and progress.
+            Daymark helps students stay on top of their academic life — manage your class schedule, 
+            track attendance, organize tasks, and see your Google Calendar events all in one place.
           </p>
+
+          <ul className="login-features">
+            <li>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--coral)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              Track your class schedule &amp; attendance
+            </li>
+            <li>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--coral)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              Manage tasks, assignments &amp; deadlines
+            </li>
+            <li>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--coral)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              Sync with your Google Calendar (read-only)
+            </li>
+            <li>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--coral)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              Visualize your progress &amp; productivity
+            </li>
+          </ul>
 
           <a href="/api/auth/google" className="google-button">
             <svg width="20" height="20" viewBox="0 0 24 24">
@@ -33,8 +55,9 @@ export default function Login() {
         </div>
 
         <p className="login-footer">
-          Your data stays private. <br />
-          We only use your name and email for sign-in.
+          Your data stays private. We only read your Google Calendar — we never modify it.
+          <br />
+          <Link href="/privacy" className="login-privacy-link">Privacy Policy</Link>
         </p>
       </div>
     </div>
