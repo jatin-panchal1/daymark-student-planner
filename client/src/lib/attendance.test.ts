@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import { getAttendanceMath, parseAttendanceCsv } from "./attendance";
 
 describe("attendance analytics", () => {
-  it("groups CSV rows by subject and preserves lab hours", () => {
-    const items = parseAttendanceCsv("#,Subject Code,Subject,Subject Type,Number of Hours,Marked\n1,MA101,Math,Lecture,1,P\n2,MA101,Math,Lecture,1,A\n3,CSL,Lab,Lab,2,P");
+  it("groups CSV rows by subject and aggregates attendance", () => {
+    const items = parseAttendanceCsv("#,Subject Code,Subject,Subject Type,Present,OD,Makeup,Absent,Percentage\n1,MA101,Math,Lecture,1,0,0,1,50.0\n2,CSL,Lab,Lab,2,0,0,0,100.0\n3,MA101,Math,Lecture,0,1,0,0,100.0");
     expect(items).toHaveLength(2);
-    expect(items[0]).toMatchObject({ code: "MA101", present: 1, absent: 1 });
-    expect(items[1]).toMatchObject({ code: "CSL", hoursPresent: 2 });
+    expect(items[0]).toMatchObject({ code: "MA101", present: 2, absent: 1 });
+    expect(items[1]).toMatchObject({ code: "CSL", present: 2, absent: 0 });
   });
 
   it("calculates classes needed to reach a target", () => {

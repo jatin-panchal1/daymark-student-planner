@@ -81,10 +81,23 @@ function parseCsvLine(line: string): string[] {
 function parseAttendanceCsv(raw: string): AttendanceItem[] {
   const lines = raw.split(/\r?\n/).filter(Boolean); const headers = parseCsvLine(lines[0]).map((header) => header.toLowerCase());
   const indexOf = (...names: string[]) => headers.findIndex((header) => names.includes(header));
-  const codeIndex = indexOf("subject code"); const nameIndex = indexOf("subject"); const typeIndex = indexOf("subject type"); const hoursIndex = indexOf("number of hours"); const markedIndex = indexOf("marked");
-  if ([codeIndex, nameIndex, typeIndex, hoursIndex, markedIndex].some((index) => index < 0)) throw new Error("CSV must include Subject Code, Subject, Subject Type, Number of Hours, and Marked columns.");
+  const codeIndex = indexOf("subject code"); const nameIndex = indexOf("subject"); const typeIndex = indexOf("subject type"); const presentIndex = indexOf("present"); const odIndex = indexOf("od"); const makeupIndex = indexOf("makeup"); const absentIndex = indexOf("absent");
+  if ([codeIndex, nameIndex, typeIndex, presentIndex, absentIndex].some((index) => index < 0)) throw new Error("CSV must include Subject Code, Subject, Subject Type, Present, and Absent columns.");
   const grouped = new Map<string, AttendanceItem>();
-  lines.slice(1).forEach((line) => { const cells = parseCsvLine(line); const code = cells[codeIndex]; if (!code) return; const item = grouped.get(code) || { code, name: cells[nameIndex], type: cells[typeIndex], present: 0, absent: 0, hoursPresent: 0, hoursAbsent: 0 }; const hours = Number(cells[hoursIndex]) || 1; const present = cells[markedIndex].toUpperCase().startsWith("P"); if (present) { item.present += 1; item.hoursPresent += hours; } else { item.absent += 1; item.hoursAbsent += hours; } grouped.set(code, item); });
+  lines.slice(1).forEach((line) => { 
+    const cells = parseCsvLine(line); const code = cells[codeIndex]; if (!code) return; 
+    const item = grouped.get(code) || { code, name: cells[nameIndex], type: cells[typeIndex], present: 0, absent: 0, hoursPresent: 0, hoursAbsent: 0 }; 
+    const present = Number(cells[presentIndex]) || 0;
+    const od = (odIndex >= 0 ? Number(cells[odIndex]) : 0) || 0;
+    const makeup = (makeupIndex >= 0 ? Number(cells[makeupIndex]) : 0) || 0;
+    const absent = Number(cells[absentIndex]) || 0;
+    const totalPresent = present + od + makeup;
+    item.present += totalPresent;
+    item.absent += absent;
+    item.hoursPresent += totalPresent;
+    item.hoursAbsent += absent;
+    grouped.set(code, item); 
+  });
   return Array.from(grouped.values());
 }
 
