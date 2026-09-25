@@ -160,7 +160,19 @@ const dayAfterStr = `${dayAfterDate.getFullYear()}-${String(dayAfterDate.getMont
 
 
 
-const initialAttendance: AttendanceItem[] = [];
+function loadStoredAttendance(): AttendanceItem[] {
+  try {
+    const stored = localStorage.getItem("daymark-attendance");
+    return stored ? JSON.parse(stored) : [];
+  } catch { return []; }
+}
+
+function loadStoredTarget(): number {
+  try {
+    const stored = localStorage.getItem("daymark-attendance-target");
+    return stored ? Number(stored) : 75;
+  } catch { return 75; }
+}
 
 const initialCalendarEvents: CalendarEvent[] = [];
 
@@ -199,8 +211,8 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
   const [bookTitle, setBookTitle] = useState("");
   const [bookAuthor, setBookAuthor] = useState("");
   const [bookReturnBy, setBookReturnBy] = useState("");
-  const [attendance, setAttendance] = useState<AttendanceItem[]>(initialAttendance);
-  const [attendanceTarget, setAttendanceTarget] = useState(75);
+  const [attendance, setAttendance] = useState<AttendanceItem[]>(loadStoredAttendance);
+  const [attendanceTarget, setAttendanceTarget] = useState(loadStoredTarget);
   const [showEventForm, setShowEventForm] = useState(false);
   const [eventKind, setEventKind] = useState<CalendarEvent["kind"]>("holiday");
   const [eventTitle, setEventTitle] = useState("");
@@ -418,6 +430,15 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
     const interval = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(interval);
   }, []);
+
+  // Persist attendance data to localStorage
+  useEffect(() => {
+    localStorage.setItem("daymark-attendance", JSON.stringify(attendance));
+  }, [attendance]);
+
+  useEffect(() => {
+    localStorage.setItem("daymark-attendance-target", String(attendanceTarget));
+  }, [attendanceTarget]);
 
   
   const todaysTasks = tasks.filter((task) => task.dueDate === selectedDateStr || task.recurringDays?.includes(selectedDow));
