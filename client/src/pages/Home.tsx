@@ -157,16 +157,6 @@ const dayAfterDate = new Date(); dayAfterDate.setDate(dayAfterDate.getDate() + 2
 const dayAfterStr = `${dayAfterDate.getFullYear()}-${String(dayAfterDate.getMonth() + 1).padStart(2, "0")}-${String(dayAfterDate.getDate()).padStart(2, "0")}`;
 
 
-
-
-
-function loadStoredAttendance(): AttendanceItem[] {
-  try {
-    const stored = localStorage.getItem("daymark-attendance");
-    return stored ? JSON.parse(stored) : [];
-  } catch { return []; }
-}
-
 function loadStoredTarget(): number {
   try {
     const stored = localStorage.getItem("daymark-attendance-target");
@@ -211,7 +201,6 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
   const [bookTitle, setBookTitle] = useState("");
   const [bookAuthor, setBookAuthor] = useState("");
   const [bookReturnBy, setBookReturnBy] = useState("");
-  const [attendance, setAttendance] = useState<AttendanceItem[]>(loadStoredAttendance);
   const [attendanceTarget, setAttendanceTarget] = useState(loadStoredTarget);
   const [showEventForm, setShowEventForm] = useState(false);
   const [eventKind, setEventKind] = useState<CalendarEvent["kind"]>("holiday");
@@ -431,14 +420,27 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
     return () => clearInterval(interval);
   }, []);
 
-  // Persist attendance data to localStorage
-  useEffect(() => {
-    localStorage.setItem("daymark-attendance", JSON.stringify(attendance));
-  }, [attendance]);
-
+  // Persist attendance target to localStorage
   useEffect(() => {
     localStorage.setItem("daymark-attendance-target", String(attendanceTarget));
   }, [attendanceTarget]);
+
+  // Cloud-backed attendance
+  const { data: rawAttendance = [] } = trpc.planner.attendance.useQuery();
+  const attendance: AttendanceItem[] = useMemo(() => rawAttendance.map(r => ({
+    code: r.subjectCode, name: r.subjectName, type: r.subjectType,
+    present: r.present, absent: r.absent, makeup: r.makeup,
+    hoursPresent: r.hoursPresent, hoursAbsent: r.hoursAbsent,
+  })), [rawAttendance]);
+
+  const importAttendanceMut = trpc.planner.importAttendance.useMutation({
+    onSuccess: (data) => { trpcCtx.planner.attendance.invalidate(); toast.success(`${data.count} subjects saved to cloud`); },
+    onError: (err) => toast.error(`Import failed: ${err.message}`),
+  });
+  const addMakeupMut = trpc.planner.addMakeup.useMutation({
+    onSuccess: () => trpcCtx.planner.attendance.invalidate(),
+    onError: (err) => toast.error(`Could not add makeup: ${err.message}`),
+  });
 
   
   const todaysTasks = tasks.filter((task) => task.dueDate === selectedDateStr || task.recurringDays?.includes(selectedDow));
@@ -592,8 +594,16 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
 
   const importAttendanceCsv = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]; if (!file) return;
-    try { const imported = parseAttendanceCsv(await file.text()); setAttendance(imported); toast.success(`${imported.length} subjects loaded from attendance CSV`); }
-    catch (error) { toast.error(error instanceof Error ? error.message : "Could not read that CSV"); }
+    try {
+      const imported = parseAttendanceCsv(await file.text());
+      importAttendanceMut.mutate({
+        records: imported.map(item => ({
+          subjectCode: item.code, subjectName: item.name, subjectType: item.type,
+          present: item.present, absent: item.absent, makeup: item.makeup,
+          hoursPresent: item.hoursPresent, hoursAbsent: item.hoursAbsent,
+        }))
+      });
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Could not read that CSV"); }
     event.target.value = "";
   };
 
@@ -619,24 +629,6 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
 
   const markAttendance = (key: string, subjectId: string, status: "attended" | "absent") => {
     markCheckinMut.mutate({ subjectId: Number(subjectId), checkinDate: selectedDateStr, status });
-    // Optimistic local update to attendance stats
-    if (status === "absent") {
-      const subject = subjects.find(s => s.id === subjectId);
-      if (subject) {
-        setAttendance((current) => current.map(item => {
-          if (item.name === subject.name || item.code === subject.code) return { ...item, absent: item.absent + 1, hoursAbsent: item.hoursAbsent + 1, makeup: item.makeup };
-          return item;
-        }));
-      }
-    } else if (status === "attended") {
-      const subject = subjects.find(s => s.id === subjectId);
-      if (subject) {
-        setAttendance((current) => current.map(item => {
-          if (item.name === subject.name || item.code === subject.code) return { ...item, present: item.present + 1, hoursPresent: item.hoursPresent + 1, makeup: item.makeup };
-          return item;
-        }));
-      }
-    }
     toast.success(status === "attended" ? "Marked as attended" : "Marked as absent");
   };
 
@@ -748,7 +740,7 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
                 <section className="panel quote-panel"><div className="quote-mark">"</div><p>Consistency is not about perfection. It's about returning to what matters.</p><span>— your future self</span></section>
               </aside>
             </div>
-          </> : activeView === "planner" ? <PlannerView subjects={subjects} tasks={tasks} weekDays={weekDays} todayDate={todayDate} onAddSubject={() => setShowSubjectForm(true)} onAddTask={() => setShowTaskForm(true)} onImport={importPlannerFile} onImportCalendar={importCalendarJson} onDeleteSubject={(id) => { deleteSubjectMut.mutate({ subjectId: Number(id) }); toast.success("Subject removed"); }} events={calendarEvents} onAddEvent={(kind) => { setEventKind(kind); setShowEventForm(true); }} onRemoveEvent={(id) => deleteEventMut.mutate({ eventId: Number(id) })} /> : activeView === "library" ? <LibraryView books={libraryBooks} onAdd={() => setShowLibraryForm(true)} onRemove={(id) => { setLibraryBooks((current) => current.filter((book) => book.id !== id)); toast.success("Book removed"); }} /> : activeView === "attendance" ? <AttendanceView attendance={attendance} target={attendanceTarget} onTargetChange={setAttendanceTarget} onImport={importAttendanceCsv} subjects={subjects} onAddMakeup={(subjectCode, hours) => { setAttendance((current) => current.map(item => item.code === subjectCode ? { ...item, makeup: item.makeup + hours, hoursPresent: item.hoursPresent + hours } : item)); toast.success(`Added ${hours} makeup hour${hours > 1 ? "s" : ""} for ${subjectCode}`); }} /> : activeView === "calendar" ? <CalendarGridView month={calMonth} year={calYear} onMonthChange={(m, y) => { setCalMonth(m); setCalYear(y); }} events={calendarEvents} onAddEvent={(kind, date) => { setEventKind(kind); setEventStart(date); setShowEventForm(true); }} onRemoveEvent={(id) => deleteEventMut.mutate({ eventId: Number(id) })} /> : <CodingView stats={codingStats} onChange={(updated) => { saveSettingsMut.mutate({ leetcodeTarget: updated.leetcodeTarget, codeforcesTarget: updated.codeforcesTarget }); }} />}
+          </> : activeView === "planner" ? <PlannerView subjects={subjects} tasks={tasks} weekDays={weekDays} todayDate={todayDate} onAddSubject={() => setShowSubjectForm(true)} onAddTask={() => setShowTaskForm(true)} onImport={importPlannerFile} onImportCalendar={importCalendarJson} onDeleteSubject={(id) => { deleteSubjectMut.mutate({ subjectId: Number(id) }); toast.success("Subject removed"); }} events={calendarEvents} onAddEvent={(kind) => { setEventKind(kind); setShowEventForm(true); }} onRemoveEvent={(id) => deleteEventMut.mutate({ eventId: Number(id) })} /> : activeView === "library" ? <LibraryView books={libraryBooks} onAdd={() => setShowLibraryForm(true)} onRemove={(id) => { setLibraryBooks((current) => current.filter((book) => book.id !== id)); toast.success("Book removed"); }} /> : activeView === "attendance" ? <AttendanceView attendance={attendance} target={attendanceTarget} onTargetChange={setAttendanceTarget} onImport={importAttendanceCsv} subjects={subjects} onAddMakeup={(subjectCode, hours) => { addMakeupMut.mutate({ subjectCode, hours }); toast.success(`Added ${hours} makeup hour${hours > 1 ? "s" : ""} for ${subjectCode}`); }} /> : activeView === "calendar" ? <CalendarGridView month={calMonth} year={calYear} onMonthChange={(m, y) => { setCalMonth(m); setCalYear(y); }} events={calendarEvents} onAddEvent={(kind, date) => { setEventKind(kind); setEventStart(date); setShowEventForm(true); }} onRemoveEvent={(id) => deleteEventMut.mutate({ eventId: Number(id) })} /> : <CodingView stats={codingStats} onChange={(updated) => { saveSettingsMut.mutate({ leetcodeTarget: updated.leetcodeTarget, codeforcesTarget: updated.codeforcesTarget }); }} />}
         </div>
       </main>
 

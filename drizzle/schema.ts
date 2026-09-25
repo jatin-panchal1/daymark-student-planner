@@ -87,6 +87,20 @@ export const codingSettings = pgTable("codingSettings", {
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
 
+export const attendanceRecords = pgTable("attendanceRecords", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  subjectCode: varchar("subjectCode", { length: 40 }).notNull(),
+  subjectName: varchar("subjectName", { length: 120 }).notNull(),
+  subjectType: varchar("subjectType", { length: 40 }).notNull(),
+  present: integer("present").default(0).notNull(),
+  absent: integer("absent").default(0).notNull(),
+  makeup: integer("makeup").default(0).notNull(),
+  hoursPresent: integer("hoursPresent").default(0).notNull(),
+  hoursAbsent: integer("hoursAbsent").default(0).notNull(),
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+}, (table) => ({ userIdx: index("attendance_user_idx").on(table.userId), codeUserUniq: uniqueIndex("attendance_code_user_uniq").on(table.subjectCode, table.userId) }));
+
 // Type exports
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
@@ -104,3 +118,5 @@ export type ClassCheckin = typeof classCheckins.$inferSelect;
 export type InsertClassCheckin = typeof classCheckins.$inferInsert;
 export type CodingSetting = typeof codingSettings.$inferSelect;
 export type InsertCodingSetting = typeof codingSettings.$inferInsert;
+export type AttendanceRecord = typeof attendanceRecords.$inferSelect;
+export type InsertAttendanceRecord = typeof attendanceRecords.$inferInsert;

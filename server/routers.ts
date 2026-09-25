@@ -8,6 +8,7 @@ import {
   deleteSubject, listCalendarEvents, createCalendarEvent, bulkCreateCalendarEvents, deleteCalendarEvent,
   listCheckins, upsertCheckin, getCodingSettings, upsertCodingSettings, createSchedules,
   upsertSubjectByName, deleteSchedulesForSubject, clearAllSubjects,
+  listAttendance, importAttendance, addMakeupHours,
 } from "./db";
 import { getFullLeetCodeData } from "./services/leetcode";
 import { getFullCodeforcesData, getUpcomingContests } from "./services/codeforces";
@@ -93,6 +94,31 @@ export const appRouter = router({
     // Class check-ins
     checkins: protectedProcedure.input(z.object({ date: z.string().date() })).query(({ ctx, input }) => listCheckins(ctx.user.id, input.date)),
     checkIn: protectedProcedure.input(z.object({ subjectId: z.number().int().positive(), checkinDate: z.string().date(), status: z.enum(["attended", "absent"]) })).mutation(({ ctx, input }) => upsertCheckin({ ...input, userId: ctx.user.id })),
+
+    // Attendance records (CSV-imported, cloud-persisted)
+    attendance: protectedProcedure.query(({ ctx }) => listAttendance(ctx.user.id)),
+    importAttendance: protectedProcedure.input(z.object({
+      records: z.array(z.object({
+        subjectCode: z.string().max(40),
+        subjectName: z.string().max(120),
+        subjectType: z.string().max(40),
+        present: z.number().int().min(0),
+        absent: z.number().int().min(0),
+        makeup: z.number().int().min(0).default(0),
+        hoursPresent: z.number().int().min(0),
+        hoursAbsent: z.number().int().min(0),
+      }))
+    })).mutation(async ({ ctx, input }) => {
+      const ids = await importAttendance(ctx.user.id, input.records);
+      return { count: ids.length };
+    }),
+    addMakeup: protectedProcedure.input(z.object({
+      subjectCode: z.string().max(40),
+      hours: z.number().int().min(1).max(10),
+    })).mutation(async ({ ctx, input }) => {
+      await addMakeupHours(ctx.user.id, input.subjectCode, input.hours);
+      return { success: true };
+    }),
   }),
   coding: router({
     getSettings: protectedProcedure.query(({ ctx }) => getCodingSettings(ctx.user.id)),

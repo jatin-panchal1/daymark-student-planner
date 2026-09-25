@@ -2,8 +2,8 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import {
-  InsertSubject, InsertSchedule, InsertTask, InsertCalendarEvent, InsertClassCheckin, InsertCodingSetting, InsertUser,
-  calendarEvents, classCheckins, codingSettings, schedules, subjects, tasks, users
+  InsertSubject, InsertSchedule, InsertTask, InsertCalendarEvent, InsertClassCheckin, InsertCodingSetting, InsertUser, InsertAttendanceRecord,
+  attendanceRecords, calendarEvents, classCheckins, codingSettings, schedules, subjects, tasks, users
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -230,4 +230,40 @@ export async function upsertCodingSettings(userId: number, data: { leetcodeUsern
   } else {
     await db.insert(codingSettings).values({ userId, ...data });
   }
+}
+
+// ──────────────────────────────────────────────
+// Attendance Records
+// ──────────────────────────────────────────────
+
+export async function listAttendance(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(attendanceRecords).where(eq(attendanceRecords.userId, userId)).orderBy(asc(attendanceRecords.subjectName));
+}
+
+export async function importAttendance(userId: number, records: Omit<InsertAttendanceRecord, "userId">[]) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  // Delete all existing attendance for this user (new CSV replaces old)
+  await db.delete(attendanceRecords).where(eq(attendanceRecords.userId, userId));
+  if (records.length === 0) return [];
+  const data = records.map(r => ({ ...r, userId }));
+  const result = await db.insert(attendanceRecords).values(data).returning({ id: attendanceRecords.id });
+  return result.map(r => r.id);
+}
+
+export async function addMakeupHours(userId: number, subjectCode: string, hours: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const existing = await db.select().from(attendanceRecords).where(
+    and(eq(attendanceRecords.userId, userId), eq(attendanceRecords.subjectCode, subjectCode))
+  ).limit(1);
+  if (existing.length === 0) throw new Error("Subject not found in attendance records");
+  const record = existing[0];
+  await db.update(attendanceRecords).set({
+    makeup: record.makeup + hours,
+    hoursPresent: record.hoursPresent + hours,
+    updatedAt: new Date(),
+  }).where(eq(attendanceRecords.id, record.id));
 }

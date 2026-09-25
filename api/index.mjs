@@ -116,6 +116,19 @@ var codingSettings = pgTable("codingSettings", {
   userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }).unique(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull()
 });
+var attendanceRecords = pgTable("attendanceRecords", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  subjectCode: varchar("subjectCode", { length: 40 }).notNull(),
+  subjectName: varchar("subjectName", { length: 120 }).notNull(),
+  subjectType: varchar("subjectType", { length: 40 }).notNull(),
+  present: integer("present").default(0).notNull(),
+  absent: integer("absent").default(0).notNull(),
+  makeup: integer("makeup").default(0).notNull(),
+  hoursPresent: integer("hoursPresent").default(0).notNull(),
+  hoursAbsent: integer("hoursAbsent").default(0).notNull(),
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull()
+}, (table) => ({ userIdx: index("attendance_user_idx").on(table.userId), codeUserUniq: uniqueIndex("attendance_code_user_uniq").on(table.subjectCode, table.userId) }));
 
 // server/_core/env.ts
 var ENV = {
@@ -310,6 +323,34 @@ async function upsertCodingSettings(userId, data) {
   } else {
     await db.insert(codingSettings).values({ userId, ...data });
   }
+}
+async function listAttendance(userId) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(attendanceRecords).where(eq(attendanceRecords.userId, userId)).orderBy(asc(attendanceRecords.subjectName));
+}
+async function importAttendance(userId, records) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  await db.delete(attendanceRecords).where(eq(attendanceRecords.userId, userId));
+  if (records.length === 0) return [];
+  const data = records.map((r) => ({ ...r, userId }));
+  const result = await db.insert(attendanceRecords).values(data).returning({ id: attendanceRecords.id });
+  return result.map((r) => r.id);
+}
+async function addMakeupHours(userId, subjectCode, hours) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const existing = await db.select().from(attendanceRecords).where(
+    and(eq(attendanceRecords.userId, userId), eq(attendanceRecords.subjectCode, subjectCode))
+  ).limit(1);
+  if (existing.length === 0) throw new Error("Subject not found in attendance records");
+  const record = existing[0];
+  await db.update(attendanceRecords).set({
+    makeup: record.makeup + hours,
+    hoursPresent: record.hoursPresent + hours,
+    updatedAt: /* @__PURE__ */ new Date()
+  }).where(eq(attendanceRecords.id, record.id));
 }
 
 // server/_core/cookies.ts
@@ -1346,7 +1387,31 @@ var appRouter = router({
     deleteEvent: protectedProcedure.input(z2.object({ eventId: z2.number().int().positive() })).mutation(({ ctx, input }) => deleteCalendarEvent(input.eventId, ctx.user.id)),
     // Class check-ins
     checkins: protectedProcedure.input(z2.object({ date: z2.string().date() })).query(({ ctx, input }) => listCheckins(ctx.user.id, input.date)),
-    checkIn: protectedProcedure.input(z2.object({ subjectId: z2.number().int().positive(), checkinDate: z2.string().date(), status: z2.enum(["attended", "absent"]) })).mutation(({ ctx, input }) => upsertCheckin({ ...input, userId: ctx.user.id }))
+    checkIn: protectedProcedure.input(z2.object({ subjectId: z2.number().int().positive(), checkinDate: z2.string().date(), status: z2.enum(["attended", "absent"]) })).mutation(({ ctx, input }) => upsertCheckin({ ...input, userId: ctx.user.id })),
+    // Attendance records (CSV-imported, cloud-persisted)
+    attendance: protectedProcedure.query(({ ctx }) => listAttendance(ctx.user.id)),
+    importAttendance: protectedProcedure.input(z2.object({
+      records: z2.array(z2.object({
+        subjectCode: z2.string().max(40),
+        subjectName: z2.string().max(120),
+        subjectType: z2.string().max(40),
+        present: z2.number().int().min(0),
+        absent: z2.number().int().min(0),
+        makeup: z2.number().int().min(0).default(0),
+        hoursPresent: z2.number().int().min(0),
+        hoursAbsent: z2.number().int().min(0)
+      }))
+    })).mutation(async ({ ctx, input }) => {
+      const ids = await importAttendance(ctx.user.id, input.records);
+      return { count: ids.length };
+    }),
+    addMakeup: protectedProcedure.input(z2.object({
+      subjectCode: z2.string().max(40),
+      hours: z2.number().int().min(1).max(10)
+    })).mutation(async ({ ctx, input }) => {
+      await addMakeupHours(ctx.user.id, input.subjectCode, input.hours);
+      return { success: true };
+    })
   }),
   coding: router({
     getSettings: protectedProcedure.query(({ ctx }) => getCodingSettings(ctx.user.id)),
