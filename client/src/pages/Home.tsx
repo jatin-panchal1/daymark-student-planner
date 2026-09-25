@@ -16,7 +16,7 @@ import { trpc } from "@/lib/trpc";
 type Subject = { id: string; name: string; code: string; color: string; days: number[]; time: string; times: Record<number, string> };
 type Task = { id: string; title: string; subjectId?: string; completed: boolean; dueDate: string; priority: "High" | "Medium" | "Low"; recurringDays?: number[] };
 type LibraryBook = { id: string; title: string; author: string; issuedOn: string; returnBy: string };
-type AttendanceItem = { code: string; name: string; type: string; present: number; absent: number; hoursPresent: number; hoursAbsent: number };
+type AttendanceItem = { code: string; name: string; type: string; present: number; absent: number; hoursPresent: number; hoursAbsent: number; makeup: number };
 type CalendarEvent = { id: string; kind: "dayoff" | "holiday" | "exam"; title: string; start: string; end: string; subject?: string; examTime?: string; afterClass?: boolean; afterSubject?: string };
 type CodingStats = { codeforcesSolved: number; codeforcesTarget: number; leetcodeSolved: number; leetcodeTarget: number; streak: number; recent: { platform: "Codeforces" | "LeetCode"; title: string; date: string }[] };
 
@@ -86,15 +86,15 @@ function parseAttendanceCsv(raw: string): AttendanceItem[] {
   const grouped = new Map<string, AttendanceItem>();
   lines.slice(1).forEach((line) => { 
     const cells = parseCsvLine(line); const code = cells[codeIndex]; if (!code) return; 
-    const item = grouped.get(code) || { code, name: cells[nameIndex], type: cells[typeIndex], present: 0, absent: 0, hoursPresent: 0, hoursAbsent: 0 }; 
+    const item = grouped.get(code) || { code, name: cells[nameIndex], type: cells[typeIndex], present: 0, absent: 0, hoursPresent: 0, hoursAbsent: 0, makeup: 0 }; 
     const present = Number(cells[presentIndex]) || 0;
     const od = (odIndex >= 0 ? Number(cells[odIndex]) : 0) || 0;
-    const makeup = (makeupIndex >= 0 ? Number(cells[makeupIndex]) : 0) || 0;
+    const makeupVal = (makeupIndex >= 0 ? Number(cells[makeupIndex]) : 0) || 0;
     const absent = Number(cells[absentIndex]) || 0;
-    const totalPresent = present + od + makeup;
-    item.present += totalPresent;
+    item.present += present + od;
+    item.makeup += makeupVal;
     item.absent += absent;
-    item.hoursPresent += totalPresent;
+    item.hoursPresent += present + od + makeupVal;
     item.hoursAbsent += absent;
     grouped.set(code, item); 
   });
@@ -603,7 +603,7 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
       const subject = subjects.find(s => s.id === subjectId);
       if (subject) {
         setAttendance((current) => current.map(item => {
-          if (item.name === subject.name || item.code === subject.code) return { ...item, absent: item.absent + 1, hoursAbsent: item.hoursAbsent + 1 };
+          if (item.name === subject.name || item.code === subject.code) return { ...item, absent: item.absent + 1, hoursAbsent: item.hoursAbsent + 1, makeup: item.makeup };
           return item;
         }));
       }
@@ -611,7 +611,7 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
       const subject = subjects.find(s => s.id === subjectId);
       if (subject) {
         setAttendance((current) => current.map(item => {
-          if (item.name === subject.name || item.code === subject.code) return { ...item, present: item.present + 1, hoursPresent: item.hoursPresent + 1 };
+          if (item.name === subject.name || item.code === subject.code) return { ...item, present: item.present + 1, hoursPresent: item.hoursPresent + 1, makeup: item.makeup };
           return item;
         }));
       }
@@ -727,7 +727,7 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
                 <section className="panel quote-panel"><div className="quote-mark">"</div><p>Consistency is not about perfection. It's about returning to what matters.</p><span>— your future self</span></section>
               </aside>
             </div>
-          </> : activeView === "planner" ? <PlannerView subjects={subjects} tasks={tasks} weekDays={weekDays} todayDate={todayDate} onAddSubject={() => setShowSubjectForm(true)} onAddTask={() => setShowTaskForm(true)} onImport={importPlannerFile} onImportCalendar={importCalendarJson} onDeleteSubject={(id) => { deleteSubjectMut.mutate({ subjectId: Number(id) }); toast.success("Subject removed"); }} events={calendarEvents} onAddEvent={(kind) => { setEventKind(kind); setShowEventForm(true); }} onRemoveEvent={(id) => deleteEventMut.mutate({ eventId: Number(id) })} /> : activeView === "library" ? <LibraryView books={libraryBooks} onAdd={() => setShowLibraryForm(true)} onRemove={(id) => { setLibraryBooks((current) => current.filter((book) => book.id !== id)); toast.success("Book removed"); }} /> : activeView === "attendance" ? <AttendanceView attendance={attendance} target={attendanceTarget} onTargetChange={setAttendanceTarget} onImport={importAttendanceCsv} /> : activeView === "calendar" ? <CalendarGridView month={calMonth} year={calYear} onMonthChange={(m, y) => { setCalMonth(m); setCalYear(y); }} events={calendarEvents} onAddEvent={(kind, date) => { setEventKind(kind); setEventStart(date); setShowEventForm(true); }} onRemoveEvent={(id) => deleteEventMut.mutate({ eventId: Number(id) })} /> : <CodingView stats={codingStats} onChange={(updated) => { saveSettingsMut.mutate({ leetcodeTarget: updated.leetcodeTarget, codeforcesTarget: updated.codeforcesTarget }); }} />}
+          </> : activeView === "planner" ? <PlannerView subjects={subjects} tasks={tasks} weekDays={weekDays} todayDate={todayDate} onAddSubject={() => setShowSubjectForm(true)} onAddTask={() => setShowTaskForm(true)} onImport={importPlannerFile} onImportCalendar={importCalendarJson} onDeleteSubject={(id) => { deleteSubjectMut.mutate({ subjectId: Number(id) }); toast.success("Subject removed"); }} events={calendarEvents} onAddEvent={(kind) => { setEventKind(kind); setShowEventForm(true); }} onRemoveEvent={(id) => deleteEventMut.mutate({ eventId: Number(id) })} /> : activeView === "library" ? <LibraryView books={libraryBooks} onAdd={() => setShowLibraryForm(true)} onRemove={(id) => { setLibraryBooks((current) => current.filter((book) => book.id !== id)); toast.success("Book removed"); }} /> : activeView === "attendance" ? <AttendanceView attendance={attendance} target={attendanceTarget} onTargetChange={setAttendanceTarget} onImport={importAttendanceCsv} subjects={subjects} onAddMakeup={(subjectCode, hours) => { setAttendance((current) => current.map(item => item.code === subjectCode ? { ...item, makeup: item.makeup + hours, hoursPresent: item.hoursPresent + hours } : item)); toast.success(`Added ${hours} makeup hour${hours > 1 ? "s" : ""} for ${subjectCode}`); }} /> : activeView === "calendar" ? <CalendarGridView month={calMonth} year={calYear} onMonthChange={(m, y) => { setCalMonth(m); setCalYear(y); }} events={calendarEvents} onAddEvent={(kind, date) => { setEventKind(kind); setEventStart(date); setShowEventForm(true); }} onRemoveEvent={(id) => deleteEventMut.mutate({ eventId: Number(id) })} /> : <CodingView stats={codingStats} onChange={(updated) => { saveSettingsMut.mutate({ leetcodeTarget: updated.leetcodeTarget, codeforcesTarget: updated.codeforcesTarget }); }} />}
         </div>
       </main>
 
@@ -831,17 +831,31 @@ function LibraryView({ books, onAdd, onRemove }: { books: LibraryBook[]; onAdd: 
 }
 
 // ─── Attendance View ──────────────────────────────────────────────────
-function AttendanceView({ attendance, target, onTargetChange, onImport }: { attendance: AttendanceItem[]; target: number; onTargetChange: (value: number) => void; onImport: (event: React.ChangeEvent<HTMLInputElement>) => void }) {
-  const totalPresent = attendance.reduce((sum, item) => sum + item.present, 0);
+function AttendanceView({ attendance, target, onTargetChange, onImport, subjects, onAddMakeup }: { attendance: AttendanceItem[]; target: number; onTargetChange: (value: number) => void; onImport: (event: React.ChangeEvent<HTMLInputElement>) => void; subjects: Subject[]; onAddMakeup: (subjectCode: string, hours: number) => void }) {
+  const [showMakeupForm, setShowMakeupForm] = useState(false);
+  const [makeupSubject, setMakeupSubject] = useState("");
+  const [makeupHours, setMakeupHours] = useState(1);
+  const [makeupTime, setMakeupTime] = useState("09:00 AM");
+  const totalPresent = attendance.reduce((sum, item) => sum + item.present + item.makeup, 0);
   const totalClasses = attendance.reduce((sum, item) => sum + item.present + item.absent, 0);
   const overall = totalClasses ? (totalPresent / totalClasses) * 100 : 0;
   const atRisk = attendance.filter((item) => getAttendanceMath(item, target).percentage < target).length;
+  const totalMakeup = attendance.reduce((sum, item) => sum + item.makeup, 0);
+
+  const handleAddMakeup = (e: FormEvent) => {
+    e.preventDefault();
+    if (!makeupSubject || makeupHours < 1) return;
+    onAddMakeup(makeupSubject, makeupHours);
+    setMakeupSubject(""); setMakeupHours(1); setMakeupTime("09:00 AM"); setShowMakeupForm(false);
+  };
+
   return <>
-    <section className="hero-row"><div><p className="eyebrow coral">ATTENDANCE CONTROL CENTRE</p><h1>Attendance</h1><p className="hero-subtitle">Know exactly how many classes to attend—or safely miss.</p></div><label className="secondary-button file-button"><FileJson size={16} /> Import Attendance CSV<input type="file" accept="text/csv,.csv" onChange={onImport} /></label></section>
-    <section className="attendance-toolbar panel"><div><p className="eyebrow">Your target</p><h2>Maintain at least</h2></div><div className="target-control"><input type="range" min="50" max="100" step="1" value={target} onChange={(event) => onTargetChange(Number(event.target.value))} /><strong>{target}%</strong></div><p className="toolbar-note">Calculations use class sessions from your CSV. Lab hours remain visible in each subject row.</p></section>
-    <section className="attendance-stats"><div className="stat-card"><p className="eyebrow">Overall attendance</p><strong className="stat-number">{overall.toFixed(1)}<small>%</small></strong><div className="stat-trend neutral">{totalPresent} present of {totalClasses} classes</div></div><div className="stat-card accent-card"><p className="eyebrow">Target percentage</p><strong className="stat-number">{target}<small>%</small></strong><div className="stat-trend">{atRisk} subjects need attention</div></div><div className="stat-card"><p className="eyebrow">Imported records</p><strong className="stat-number">{totalClasses}<small> classes</small></strong><div className="stat-trend neutral">{attendance.length} subjects from report</div></div></section>
-    <section className="panel attendance-panel"><SectionTitle eyebrow="Subject-by-subject forecast" title="Your attendance runway" action={<span className="attendance-legend"><i className="legend-good" /> on track <i className="legend-risk" /> action needed</span>} /><div className="attendance-table"><div className="attendance-head"><span>Subject</span><span>Current</span><span>Present / total</span><span>To reach {target}%</span><span>Can miss</span></div>{attendance.map((item) => { const math = getAttendanceMath(item, target); const good = math.percentage >= target; return <div className="attendance-row" key={item.code}><div className="attendance-subject"><span className={`attendance-status ${good ? "good" : "risk"}`} /><div><strong>{item.name}</strong><small>{item.code} · {item.type} · {item.hoursPresent + item.hoursAbsent} hours</small></div></div><strong className={good ? "attendance-percent good-text" : "attendance-percent risk-text"}>{math.percentage.toFixed(1)}%</strong><span className="attendance-count">{item.present} / {math.total}</span><span className={`attendance-action ${good ? "good-box" : "risk-box"}`}>{good ? "Already there" : `${math.classesNeeded} more ${math.classesNeeded === 1 ? "class" : "classes"}`}</span><span className="attendance-skip">{good ? `${math.classesCanSkip} ${math.classesCanSkip === 1 ? "class" : "classes"}` : "0 classes"}</span></div>; })}</div></section>
-    <section className="attendance-explainer"><div className="smart-panel-icon"><BarChart3 size={20} /></div><div><p className="eyebrow">How to read this</p><h3>Attend every "more classes" number before taking a break.</h3><p>For example, at a 75% target, 15 present out of 21 classes means you need to attend the next 3 classes to reach 75%. Once you are on track, "Can miss" shows the maximum future absences before falling below your target.</p></div></section>
+    <section className="hero-row"><div><p className="eyebrow coral">ATTENDANCE CONTROL CENTRE</p><h1>Attendance</h1><p className="hero-subtitle">Know exactly how many classes to attend—or safely miss.</p></div><div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}><button className="primary-button" onClick={() => setShowMakeupForm(true)}><Plus size={16} /> Add Makeup Class</button><label className="secondary-button file-button"><FileJson size={16} /> Import CSV<input type="file" accept="text/csv,.csv" onChange={onImport} /></label></div></section>
+    <section className="attendance-toolbar panel"><div><p className="eyebrow">Your target</p><h2>Maintain at least</h2></div><div className="target-control"><input type="range" min="50" max="100" step="1" value={target} onChange={(event) => onTargetChange(Number(event.target.value))} /><strong>{target}%</strong></div><p className="toolbar-note">Makeup classes add to your attended count without increasing total classes. This boosts your percentage.</p></section>
+    <section className="attendance-stats"><div className="stat-card"><p className="eyebrow">Overall attendance</p><strong className="stat-number">{overall.toFixed(1)}<small>%</small></strong><div className="stat-trend neutral">{totalPresent} present of {totalClasses} classes</div></div><div className="stat-card accent-card"><p className="eyebrow">Target percentage</p><strong className="stat-number">{target}<small>%</small></strong><div className="stat-trend">{atRisk} subjects need attention</div></div><div className="stat-card"><p className="eyebrow">Makeup hours</p><strong className="stat-number">{totalMakeup}<small> {totalMakeup === 1 ? "hour" : "hours"}</small></strong><div className="stat-trend neutral">Boosts attendance without adding to total</div></div></section>
+    <section className="panel attendance-panel"><SectionTitle eyebrow="Subject-by-subject forecast" title="Your attendance runway" action={<span className="attendance-legend"><i className="legend-good" /> on track <i className="legend-risk" /> action needed</span>} /><div className="attendance-table"><div className="attendance-head"><span>Subject</span><span>Current</span><span>Effective / total</span><span>Makeup</span><span>To reach {target}%</span><span>Can miss</span></div>{attendance.map((item) => { const math = getAttendanceMath(item, target); const good = math.percentage >= target; return <div className="attendance-row" key={item.code}><div className="attendance-subject"><span className={`attendance-status ${good ? "good" : "risk"}`} /><div><strong>{item.name}</strong><small>{item.code} · {item.type} · {item.hoursPresent + item.hoursAbsent} hours</small></div></div><strong className={good ? "attendance-percent good-text" : "attendance-percent risk-text"}>{math.percentage.toFixed(1)}%</strong><span className="attendance-count">{math.effective} / {math.total}</span><span className="attendance-count">{item.makeup > 0 ? <span style={{ color: "#8ea7ff", fontWeight: 600 }}>+{item.makeup}</span> : "—"}</span><span className={`attendance-action ${good ? "good-box" : "risk-box"}`}>{good ? "Already there" : `${math.classesNeeded} more ${math.classesNeeded === 1 ? "class" : "classes"}`}</span><span className="attendance-skip">{good ? `${math.classesCanSkip} ${math.classesCanSkip === 1 ? "class" : "classes"}` : "0 classes"}</span></div>; })}</div></section>
+    <section className="attendance-explainer"><div className="smart-panel-icon"><BarChart3 size={20} /></div><div><p className="eyebrow">How makeup classes work</p><h3>Makeup hours boost your numerator without increasing total classes.</h3><p>For example, if you have 15 present out of 21 total (71.4%), adding 3 makeup hours gives you 18/21 = 85.7%. The total stays at 21 because makeup doesn't count as a scheduled class — it only adds to your attended count.</p></div></section>
+    {showMakeupForm && <div className="modal-backdrop" onClick={() => setShowMakeupForm(false)}><form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={handleAddMakeup}><div className="modal-head"><h2>Add Makeup Class</h2><button type="button" className="icon-button" onClick={() => setShowMakeupForm(false)}><X size={18} /></button></div><p style={{ margin: "0 0 18px", color: "#819486", fontSize: "12px", lineHeight: 1.5 }}>Makeup hours add to your attended count <strong>without</strong> increasing the total number of classes. This boosts your attendance percentage.</p><label className="field-label">Subject<select value={makeupSubject} onChange={(e) => setMakeupSubject(e.target.value)} required><option value="">Select a subject</option>{attendance.map((item) => <option key={item.code} value={item.code}>{item.name} ({item.code})</option>)}</select></label><label className="field-label">Class time<input type="text" value={makeupTime} onChange={(e) => setMakeupTime(e.target.value)} placeholder="e.g. 10:00 AM" /></label><label className="field-label">Number of hours<input type="number" min="1" max="10" value={makeupHours} onChange={(e) => setMakeupHours(Number(e.target.value))} required /><span style={{ marginTop: "4px", color: "#a7afa9", fontSize: "10px" }}>How many hours this makeup class counts for</span></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowMakeupForm(false)}>Cancel</button><button type="submit" className="primary-button"><Plus size={16} /> Add Makeup Hours</button></div></form></div>}
   </>;
 }
 

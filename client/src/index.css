@@ -283,7 +283,7 @@ h3 { font-size: 17px; }
 .legend-good { background: #69ad82; }
 .legend-risk { margin-left: 8px; background: #e97859; }
 .attendance-table { min-width: 720px; margin-top: 19px; overflow-x: auto; }
-.attendance-head, .attendance-row { display: grid; grid-template-columns: minmax(270px, 1.8fr) 85px 120px 130px 95px; gap: 15px; align-items: center; }
+.attendance-head, .attendance-row { display: grid; grid-template-columns: minmax(220px, 1.8fr) 85px 120px 80px 130px 95px; gap: 15px; align-items: center; }
 .attendance-head { padding: 0 10px 12px; color: #a1aaa3; font: 9px 'DM Mono', monospace; text-transform: uppercase; }
 .attendance-row { min-height: 70px; padding: 10px; border-top: 1px solid #eef0ec; }
 .attendance-subject { display: flex; align-items: center; gap: 10px; min-width: 0; }

@@ -1,4 +1,4 @@
-export type AttendanceItem = { code: string; name: string; type: string; present: number; absent: number; hoursPresent: number; hoursAbsent: number };
+export type AttendanceItem = { code: string; name: string; type: string; present: number; absent: number; hoursPresent: number; hoursAbsent: number; makeup: number };
 
 function parseCsvLine(line: string): string[] {
   const values: string[] = []; let value = ""; let quoted = false;
@@ -20,15 +20,15 @@ export function parseAttendanceCsv(raw: string): AttendanceItem[] {
   const grouped = new Map<string, AttendanceItem>();
   lines.slice(1).forEach((line) => {
     const cells = parseCsvLine(line); const code = cells[codeIndex]; if (!code) return;
-    const item = grouped.get(code) || { code, name: cells[nameIndex], type: cells[typeIndex], present: 0, absent: 0, hoursPresent: 0, hoursAbsent: 0 };
+    const item = grouped.get(code) || { code, name: cells[nameIndex], type: cells[typeIndex], present: 0, absent: 0, hoursPresent: 0, hoursAbsent: 0, makeup: 0 };
     const present = Number(cells[presentIndex]) || 0;
     const od = (odIndex >= 0 ? Number(cells[odIndex]) : 0) || 0;
-    const makeup = (makeupIndex >= 0 ? Number(cells[makeupIndex]) : 0) || 0;
+    const makeupVal = (makeupIndex >= 0 ? Number(cells[makeupIndex]) : 0) || 0;
     const absent = Number(cells[absentIndex]) || 0;
-    const totalPresent = present + od + makeup;
-    item.present += totalPresent;
+    item.present += present + od;
+    item.makeup += makeupVal;
     item.absent += absent;
-    item.hoursPresent += totalPresent;
+    item.hoursPresent += present + od + makeupVal;
     item.hoursAbsent += absent;
     grouped.set(code, item);
   });
@@ -36,8 +36,12 @@ export function parseAttendanceCsv(raw: string): AttendanceItem[] {
 }
 
 export function getAttendanceMath(item: AttendanceItem, target: number) {
-  const total = item.present + item.absent; const percentage = total ? (item.present / total) * 100 : 0;
-  const classesNeeded = percentage >= target ? 0 : Math.ceil((target * total - 100 * item.present) / (100 - target));
-  const classesCanSkip = percentage < target ? 0 : Math.max(0, Math.floor((100 * item.present / target) - total));
-  return { total, percentage, classesNeeded, classesCanSkip };
+  // total = regular present + absent (makeup does NOT count in denominator)
+  const total = item.present + item.absent;
+  // effective present = regular present + makeup hours (makeup boosts numerator only)
+  const effective = item.present + item.makeup;
+  const percentage = total ? (effective / total) * 100 : 0;
+  const classesNeeded = percentage >= target ? 0 : Math.ceil((target * total - 100 * effective) / (100 - target));
+  const classesCanSkip = percentage < target ? 0 : Math.max(0, Math.floor((100 * effective / target) - total));
+  return { total, percentage, classesNeeded, classesCanSkip, effective };
 }
