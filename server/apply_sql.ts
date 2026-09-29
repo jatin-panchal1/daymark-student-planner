@@ -5,7 +5,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 async function run() {
-  const sqlContent = fs.readFileSync('drizzle/0005_add_task_completions.sql', 'utf-8');
+  const sqlContent = fs.readFileSync('drizzle/0006_add_task_due_time.sql', 'utf-8');
   console.log('Connecting to', process.env.DATABASE_URL);
   const sql = postgres(process.env.DATABASE_URL!);
   try {

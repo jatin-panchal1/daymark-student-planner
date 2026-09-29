@@ -38,6 +38,7 @@ export const tasks = pgTable("tasks", {
   subjectId: integer("subjectId").references(() => subjects.id, { onDelete: "set null" }),
   isCompleted: boolean("isCompleted").default(false).notNull(),
   dueDate: date("dueDate"),
+  dueTime: varchar("dueTime", { length: 16 }),
   priority: varchar("priority", { length: 16 }).default("Medium").notNull(),
   recurringDays: varchar("recurringDays", { length: 32 }),
   userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),

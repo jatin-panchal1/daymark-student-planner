@@ -54,8 +54,8 @@ export const appRouter = router({
       await clearAllSubjects(ctx.user.id);
       return { success: true };
     }),
-    createTask: protectedProcedure.input(z.object({ title: z.string().min(1).max(255), subjectId: z.number().int().positive().optional(), dueDate: z.string().date().nullable().optional(), priority: z.enum(["High", "Medium", "Low"]).default("Medium"), recurringDays: z.array(z.number().int().min(1).max(6)).default([]) })).mutation(async ({ ctx, input }) => {
-      const taskId = await createTask({ title: input.title, subjectId: input.subjectId, dueDate: input.dueDate || null, priority: input.priority, recurringDays: input.recurringDays.join(","), userId: ctx.user.id });
+    createTask: protectedProcedure.input(z.object({ title: z.string().min(1).max(255), subjectId: z.number().int().positive().optional(), dueDate: z.string().date().nullable().optional(), dueTime: z.string().max(16).optional(), priority: z.enum(["High", "Medium", "Low"]).default("Medium"), recurringDays: z.array(z.number().int().min(1).max(6)).default([]) })).mutation(async ({ ctx, input }) => {
+      const taskId = await createTask({ title: input.title, subjectId: input.subjectId, dueDate: input.dueDate || null, dueTime: input.dueTime || null, priority: input.priority, recurringDays: input.recurringDays.join(","), userId: ctx.user.id });
       return { taskId };
     }),
     toggleTask: protectedProcedure.input(z.object({ taskId: z.number().int().positive(), isCompleted: z.boolean() })).mutation(({ ctx, input }) => updateTask(input.taskId, ctx.user.id, input.isCompleted)),

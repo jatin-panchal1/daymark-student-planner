@@ -70,6 +70,7 @@ var tasks = pgTable("tasks", {
   subjectId: integer("subjectId").references(() => subjects.id, { onDelete: "set null" }),
   isCompleted: boolean("isCompleted").default(false).notNull(),
   dueDate: date("dueDate"),
+  dueTime: varchar("dueTime", { length: 16 }),
   priority: varchar("priority", { length: 16 }).default("Medium").notNull(),
   recurringDays: varchar("recurringDays", { length: 32 }),
   userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
@@ -129,6 +130,13 @@ var attendanceRecords = pgTable("attendanceRecords", {
   userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
   updatedAt: timestamp("updatedAt").defaultNow().notNull()
 }, (table) => ({ userIdx: index("attendance_user_idx").on(table.userId), codeUserUniq: uniqueIndex("attendance_code_user_uniq").on(table.subjectCode, table.userId) }));
+var taskCompletions = pgTable("taskCompletions", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  taskId: integer("taskId").notNull().references(() => tasks.id, { onDelete: "cascade" }),
+  completionDate: date("completionDate").notNull(),
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("createdAt").defaultNow().notNull()
+}, (table) => ({ userIdx: index("task_completions_user_idx").on(table.userId), taskDateUniq: uniqueIndex("task_completions_task_date_uniq").on(table.taskId, table.completionDate) }));
 
 // server/_core/env.ts
 var ENV = {
@@ -351,6 +359,22 @@ async function addMakeupHours(userId, subjectCode, hours) {
     hoursPresent: record.hoursPresent + hours,
     updatedAt: /* @__PURE__ */ new Date()
   }).where(eq(attendanceRecords.id, record.id));
+}
+async function listTaskCompletions(userId, date2) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(taskCompletions).where(and(eq(taskCompletions.userId, userId), eq(taskCompletions.completionDate, date2)));
+}
+async function toggleTaskCompletion(taskId, userId, date2, completed) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  if (completed) {
+    await db.insert(taskCompletions).values({ taskId, completionDate: date2, userId }).onConflictDoNothing();
+  } else {
+    await db.delete(taskCompletions).where(
+      and(eq(taskCompletions.taskId, taskId), eq(taskCompletions.completionDate, date2), eq(taskCompletions.userId, userId))
+    );
+  }
 }
 
 // server/_core/cookies.ts
@@ -1349,12 +1373,15 @@ var appRouter = router({
       await clearAllSubjects(ctx.user.id);
       return { success: true };
     }),
-    createTask: protectedProcedure.input(z2.object({ title: z2.string().min(1).max(255), subjectId: z2.number().int().positive().optional(), dueDate: z2.string().date().nullable().optional(), priority: z2.enum(["High", "Medium", "Low"]).default("Medium"), recurringDays: z2.array(z2.number().int().min(1).max(6)).default([]) })).mutation(async ({ ctx, input }) => {
-      const taskId = await createTask({ title: input.title, subjectId: input.subjectId, dueDate: input.dueDate || null, priority: input.priority, recurringDays: input.recurringDays.join(","), userId: ctx.user.id });
+    createTask: protectedProcedure.input(z2.object({ title: z2.string().min(1).max(255), subjectId: z2.number().int().positive().optional(), dueDate: z2.string().date().nullable().optional(), dueTime: z2.string().max(16).optional(), priority: z2.enum(["High", "Medium", "Low"]).default("Medium"), recurringDays: z2.array(z2.number().int().min(1).max(6)).default([]) })).mutation(async ({ ctx, input }) => {
+      const taskId = await createTask({ title: input.title, subjectId: input.subjectId, dueDate: input.dueDate || null, dueTime: input.dueTime || null, priority: input.priority, recurringDays: input.recurringDays.join(","), userId: ctx.user.id });
       return { taskId };
     }),
     toggleTask: protectedProcedure.input(z2.object({ taskId: z2.number().int().positive(), isCompleted: z2.boolean() })).mutation(({ ctx, input }) => updateTask(input.taskId, ctx.user.id, input.isCompleted)),
     deleteTask: protectedProcedure.input(z2.object({ taskId: z2.number().int().positive() })).mutation(({ ctx, input }) => deleteTask(input.taskId, ctx.user.id)),
+    // Per-day completions for recurring/daily tasks
+    taskCompletions: protectedProcedure.input(z2.object({ date: z2.string().date() })).query(({ ctx, input }) => listTaskCompletions(ctx.user.id, input.date)),
+    toggleDailyCompletion: protectedProcedure.input(z2.object({ taskId: z2.number().int().positive(), date: z2.string().date(), completed: z2.boolean() })).mutation(({ ctx, input }) => toggleTaskCompletion(input.taskId, ctx.user.id, input.date, input.completed)),
     // Calendar events
     events: protectedProcedure.query(({ ctx }) => listCalendarEvents(ctx.user.id)),
     createEvent: protectedProcedure.input(z2.object({
