@@ -240,6 +240,10 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
     });
   }, [rawSubjects, rawSchedules]);
 
+  const selectedWeekDay = weekDays.find((day) => day.date === selectedDay);
+  const selectedDow = selectedWeekDay?.dow || todayDow;
+  const selectedDateStr = selectedWeekDay?.dateStr || todayDate;
+
   const { data: rawTasks = [] } = trpc.planner.tasks.useQuery();
 
   // Fetch per-day completions for the selected date
@@ -278,10 +282,6 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
       afterSubject: e.afterSubject || undefined
     }));
   }, [rawEvents]);
-
-  const selectedWeekDay = weekDays.find((day) => day.date === selectedDay);
-  const selectedDow = selectedWeekDay?.dow || todayDow;
-  const selectedDateStr = selectedWeekDay?.dateStr || todayDate;
 
   const { data: rawCheckins = [] } = trpc.planner.checkins.useQuery({ date: selectedDateStr });
   const classCheckins = useMemo(() => {
