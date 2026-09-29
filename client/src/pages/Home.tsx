@@ -370,7 +370,7 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
           isCompleted: false,
           dueDate: input.dueDate ?? null,
           dueTime: input.dueTime ?? null,
-          priority: input.priority,
+          priority: input.priority ?? "Medium",
           recurringDays: input.recurringDays?.length ? input.recurringDays.join(",") : null,
           userId: 0,
           createdAt: new Date()
