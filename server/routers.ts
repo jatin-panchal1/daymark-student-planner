@@ -9,6 +9,7 @@ import {
   listCheckins, upsertCheckin, getCodingSettings, upsertCodingSettings, createSchedules,
   upsertSubjectByName, deleteSchedulesForSubject, clearAllSubjects,
   listAttendance, importAttendance, addMakeupHours,
+  listTaskCompletions, toggleTaskCompletion,
 } from "./db";
 import { getFullLeetCodeData } from "./services/leetcode";
 import { getFullCodeforcesData, getUpcomingContests } from "./services/codeforces";
@@ -59,6 +60,10 @@ export const appRouter = router({
     }),
     toggleTask: protectedProcedure.input(z.object({ taskId: z.number().int().positive(), isCompleted: z.boolean() })).mutation(({ ctx, input }) => updateTask(input.taskId, ctx.user.id, input.isCompleted)),
     deleteTask: protectedProcedure.input(z.object({ taskId: z.number().int().positive() })).mutation(({ ctx, input }) => deleteTask(input.taskId, ctx.user.id)),
+
+    // Per-day completions for recurring/daily tasks
+    taskCompletions: protectedProcedure.input(z.object({ date: z.string().date() })).query(({ ctx, input }) => listTaskCompletions(ctx.user.id, input.date)),
+    toggleDailyCompletion: protectedProcedure.input(z.object({ taskId: z.number().int().positive(), date: z.string().date(), completed: z.boolean() })).mutation(({ ctx, input }) => toggleTaskCompletion(input.taskId, ctx.user.id, input.date, input.completed)),
 
     // Calendar events
     events: protectedProcedure.query(({ ctx }) => listCalendarEvents(ctx.user.id)),

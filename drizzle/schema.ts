@@ -101,6 +101,14 @@ export const attendanceRecords = pgTable("attendanceRecords", {
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 }, (table) => ({ userIdx: index("attendance_user_idx").on(table.userId), codeUserUniq: uniqueIndex("attendance_code_user_uniq").on(table.subjectCode, table.userId) }));
 
+export const taskCompletions = pgTable("taskCompletions", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  taskId: integer("taskId").notNull().references(() => tasks.id, { onDelete: "cascade" }),
+  completionDate: date("completionDate").notNull(),
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({ userIdx: index("task_completions_user_idx").on(table.userId), taskDateUniq: uniqueIndex("task_completions_task_date_uniq").on(table.taskId, table.completionDate) }));
+
 // Type exports
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
@@ -120,3 +128,6 @@ export type CodingSetting = typeof codingSettings.$inferSelect;
 export type InsertCodingSetting = typeof codingSettings.$inferInsert;
 export type AttendanceRecord = typeof attendanceRecords.$inferSelect;
 export type InsertAttendanceRecord = typeof attendanceRecords.$inferInsert;
+export type TaskCompletion = typeof taskCompletions.$inferSelect;
+export type InsertTaskCompletion = typeof taskCompletions.$inferInsert;
+

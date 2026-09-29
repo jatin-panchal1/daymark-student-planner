@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import {
   InsertSubject, InsertSchedule, InsertTask, InsertCalendarEvent, InsertClassCheckin, InsertCodingSetting, InsertUser, InsertAttendanceRecord,
-  attendanceRecords, calendarEvents, classCheckins, codingSettings, schedules, subjects, tasks, users
+  attendanceRecords, calendarEvents, classCheckins, codingSettings, schedules, subjects, tasks, users, taskCompletions
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -267,3 +267,28 @@ export async function addMakeupHours(userId: number, subjectCode: string, hours:
     updatedAt: new Date(),
   }).where(eq(attendanceRecords.id, record.id));
 }
+
+// ──────────────────────────────────────────────
+// Task Completions (per-day for recurring tasks)
+// ──────────────────────────────────────────────
+
+export async function listTaskCompletions(userId: number, date: string) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(taskCompletions).where(and(eq(taskCompletions.userId, userId), eq(taskCompletions.completionDate, date)));
+}
+
+export async function toggleTaskCompletion(taskId: number, userId: number, date: string, completed: boolean) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  if (completed) {
+    // Insert completion record (ignore conflict if already exists)
+    await db.insert(taskCompletions).values({ taskId, completionDate: date, userId }).onConflictDoNothing();
+  } else {
+    // Remove completion record for this day
+    await db.delete(taskCompletions).where(
+      and(eq(taskCompletions.taskId, taskId), eq(taskCompletions.completionDate, date), eq(taskCompletions.userId, userId))
+    );
+  }
+}
+

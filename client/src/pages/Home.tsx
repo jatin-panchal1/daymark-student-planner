@@ -241,18 +241,27 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
   }, [rawSubjects, rawSchedules]);
 
   const { data: rawTasks = [] } = trpc.planner.tasks.useQuery();
+
+  // Fetch per-day completions for the selected date
+  const { data: rawDailyCompletions = [] } = trpc.planner.taskCompletions.useQuery({ date: selectedDateStr });
+  const dailyCompletionSet = useMemo(() => new Set(rawDailyCompletions.map(c => c.taskId)), [rawDailyCompletions]);
+
   const tasks = useMemo(() => {
-    return rawTasks.map(t => ({
-      ...t,
-      id: String(t.id),
-      subjectId: t.subjectId ? String(t.subjectId) : undefined,
-      title: t.title,
-      dueDate: t.dueDate || "",
-      completed: t.isCompleted,
-      recurringDays: t.recurringDays ? t.recurringDays.split(",").map(Number) : undefined,
-      priority: t.priority as Task["priority"]
-    }));
-  }, [rawTasks]);
+    return rawTasks.map(t => {
+      const isRecurring = !!(t.recurringDays && t.recurringDays.length > 0);
+      return {
+        ...t,
+        id: String(t.id),
+        subjectId: t.subjectId ? String(t.subjectId) : undefined,
+        title: t.title,
+        dueDate: t.dueDate || "",
+        completed: isRecurring ? dailyCompletionSet.has(t.id) : t.isCompleted,
+        isRecurring,
+        recurringDays: t.recurringDays ? t.recurringDays.split(",").map(Number) : undefined,
+        priority: t.priority as Task["priority"]
+      };
+    });
+  }, [rawTasks, dailyCompletionSet]);
 
   const { data: rawEvents = [] } = trpc.planner.events.useQuery();
   const calendarEvents = useMemo(() => {
@@ -336,6 +345,23 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
   const upsertSubjectMut = trpc.planner.upsertSubject.useMutation({ onSuccess: () => { trpcCtx.planner.subjects.invalidate(); trpcCtx.planner.schedules.invalidate(); }});
   const clearAllSubjectsMut = trpc.planner.clearAllSubjects.useMutation({ onSuccess: () => { trpcCtx.planner.subjects.invalidate(); trpcCtx.planner.schedules.invalidate(); trpcCtx.planner.tasks.invalidate(); trpcCtx.planner.checkins.invalidate(); }});
   const createTaskMut = trpc.planner.createTask.useMutation({ onSuccess: () => trpcCtx.planner.tasks.invalidate() });
+
+  // ── Optimistic: Toggle Daily Task Completion (per-day) ──
+  const toggleDailyCompletionMut = trpc.planner.toggleDailyCompletion.useMutation({
+    onMutate: async (input) => {
+      await trpcCtx.planner.taskCompletions.cancel();
+      const prev = trpcCtx.planner.taskCompletions.getData({ date: input.date });
+      trpcCtx.planner.taskCompletions.setData({ date: input.date }, (old) => {
+        if (input.completed) {
+          return [...(old ?? []), { id: -1, taskId: input.taskId, completionDate: input.date, userId: 0, createdAt: new Date() }];
+        }
+        return (old ?? []).filter(c => c.taskId !== input.taskId);
+      });
+      return { prev, date: input.date };
+    },
+    onError: (_err, _input, ctx) => { if (ctx?.prev) trpcCtx.planner.taskCompletions.setData({ date: ctx.date }, ctx.prev); toast.error("Failed to update task"); },
+    onSettled: (_d, _e, input) => trpcCtx.planner.taskCompletions.invalidate({ date: input.date }),
+  });
   const createEventMut = trpc.planner.createEvent.useMutation({ onSuccess: () => trpcCtx.planner.events.invalidate() });
   const importEventsMut = trpc.planner.importEvents.useMutation({ onSuccess: () => trpcCtx.planner.events.invalidate() });
 
@@ -452,7 +478,8 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
   const selectedDateLabel = selectedDateStr === todayDate ? `Today, ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric" })}` : `${selectedWeekDay?.full}, ${new Date(selectedDateStr + "T12:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric" })}`;
   const userInitials = user?.name ? user.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2) : "U";
 
-  const upcomingTasks = useMemo(() => tasks.filter((task) => !task.completed).sort((a, b) => a.dueDate.localeCompare(b.dueDate)), [tasks]);
+  // Exclude recurring tasks from upcoming — they have no single due date
+  const upcomingTasks = useMemo(() => tasks.filter((task) => !task.completed && !task.isRecurring && task.dueDate).sort((a, b) => a.dueDate.localeCompare(b.dueDate)), [tasks]);
 
   const subjectById = (id?: string) => subjects.find((subject) => subject.id === id);
   const todaysClasses = calendarEvents.some((event) => (event.kind === "dayoff" || event.kind === "holiday") && event.start <= selectedDateStr && event.end >= selectedDateStr) ? [] : subjects.filter((subject) => subject.days.includes(selectedDow)).map((subject) => ({ subject, time: subject.times[selectedDow] || subject.time }));
@@ -473,7 +500,13 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
 
   const toggleTask = (id: string) => { 
     const task = tasks.find(t => t.id === id);
-    if (task) toggleTaskMut.mutate({ taskId: Number(id), isCompleted: !task.completed }); 
+    if (!task) return;
+    if (task.isRecurring) {
+      // Per-day completion for recurring/daily tasks
+      toggleDailyCompletionMut.mutate({ taskId: Number(id), date: selectedDateStr, completed: !task.completed });
+    } else {
+      toggleTaskMut.mutate({ taskId: Number(id), isCompleted: !task.completed });
+    }
   };
 
   const addTask = (event: FormEvent) => {
@@ -485,13 +518,13 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
     createTaskMut.mutate({
       title: taskTitle.trim(),
       subjectId: taskSubject ? Number(taskSubject) : undefined,
-      dueDate: taskDate || smartDate || todayDate,
+      dueDate: isDailyTask ? null : (taskDate || smartDate || todayDate),
       priority: taskPriority,
       recurringDays: isDailyTask ? taskDays : []
     }, {
       onSuccess: () => {
         setTaskTitle(""); setTaskSubject(""); setTaskDate(""); setTaskPriority("Medium"); setIsDailyTask(false); setTaskDays([1, 2, 3, 4, 5, 6]); setShowTaskForm(false);
-        toast.success(taskDate ? "Task added with your due date" : subject ? `Task added · due ${formatDateLabel(taskDate || smartDate || todayDate)}` : "Task added to your day");
+        toast.success(isDailyTask ? "Daily task created — it will repeat on selected days" : taskDate ? "Task added with your due date" : subject ? `Task added · due ${formatDateLabel(taskDate || smartDate || todayDate)}` : "Task added to your day");
       },
       onError: (err) => toast.error(`Could not add task: ${err.message}`),
     });
@@ -722,14 +755,14 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
             <section className="stats-grid">
               <div className="stat-card progress-card"><div><p className="eyebrow">Daily progress</p><h3>{progress === 100 ? "Day complete" : `${openCount} tasks to go`}</h3><p className="muted">Keep your momentum going.</p></div><ProgressRing value={progress} /></div>
               <div className="stat-card accent-card"><div className="stat-icon"><Flame size={19} /></div><p className="eyebrow">Current streak</p><strong className="stat-number">{codingStats.streak} <small>days</small></strong><div className="stat-trend">{codingStats.streak > 0 ? <><TrendingUp size={14} /> Keep it going!</> : <>Start solving to build a streak</>}</div></div>
-              {(() => { const weekStart = new Date(); weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7)); weekStart.setHours(0,0,0,0); const weekCompleted = tasks.filter(t => t.completed && weekDays.some(d => d.dateStr === t.dueDate)).length; return <div className="stat-card"><div className="stat-icon lavender"><Target size={19} /></div><p className="eyebrow">Tasks this week</p><strong className="stat-number">{weekCompleted} <small>done</small></strong><div className="stat-trend neutral"><Clock3 size={14} /> {tasks.filter(t => !t.completed && weekDays.some(d => d.dateStr === t.dueDate)).length} remaining</div></div>; })()}
+              {(() => { const weekStart = new Date(); weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7)); weekStart.setHours(0,0,0,0); const nonRecurring = tasks.filter(t => !t.isRecurring); const weekCompleted = nonRecurring.filter(t => t.completed && weekDays.some(d => d.dateStr === t.dueDate)).length; return <div className="stat-card"><div className="stat-icon lavender"><Target size={19} /></div><p className="eyebrow">Tasks this week</p><strong className="stat-number">{weekCompleted} <small>done</small></strong><div className="stat-trend neutral"><Clock3 size={14} /> {nonRecurring.filter(t => !t.completed && weekDays.some(d => d.dateStr === t.dueDate)).length} remaining</div></div>; })()}
             </section>
 
             <div className="dashboard-grid">
               <section className="panel tasks-panel">
                 <SectionTitle eyebrow={selectedDateStr === todayDate ? "Your focus list" : "Selected day"} title={selectedDateLabel} action={<button className="text-button" onClick={() => setShowTaskForm(true)}>Add task <ArrowRight size={15} /></button>} />
                 <div className="task-list">
-                  {todaysTasks.map((task, index) => { const subject = subjectById(task.subjectId); return <div className={`task-row ${task.completed ? "task-done" : ""}`} key={task.id} style={{ animationDelay: `${index * 40}ms` }}><button className={`task-checkbox ${task.completed ? "checked" : ""}`} onClick={() => toggleTask(task.id)} aria-label={task.completed ? "Mark as incomplete" : "Mark as complete"}>{task.completed && <Check size={14} />}</button><div className="task-main"><strong>{task.title}</strong><div className="task-meta">{subject && <span className="subject-tag"><span className="subject-dot" style={{ background: subject.color }} />{subject.name}</span>}<span className={`priority ${task.priority.toLowerCase()}`}>{task.priority}</span></div></div><span className="task-time">{task.completed ? "Done" : task.dueDate === todayDate ? "Today" : formatDateLabel(task.dueDate)}</span><button className="row-menu" aria-label="More actions" onClick={() => { deleteTaskMut.mutate({ taskId: Number(task.id) }); toast.success("Task removed"); }}><Trash2 size={15} /></button></div>; })}
+                  {todaysTasks.map((task, index) => { const subject = subjectById(task.subjectId); return <div className={`task-row ${task.completed ? "task-done" : ""}`} key={task.id} style={{ animationDelay: `${index * 40}ms` }}><button className={`task-checkbox ${task.completed ? "checked" : ""}`} onClick={() => toggleTask(task.id)} aria-label={task.completed ? "Mark as incomplete" : "Mark as complete"}>{task.completed && <Check size={14} />}</button><div className="task-main"><strong>{task.title}</strong><div className="task-meta">{subject && <span className="subject-tag"><span className="subject-dot" style={{ background: subject.color }} />{subject.name}</span>}<span className={`priority ${task.priority.toLowerCase()}`}>{task.priority}</span>{task.isRecurring && <span className="subject-tag">↻ Daily</span>}</div></div><span className="task-time">{task.completed ? "Done" : task.isRecurring ? "Daily" : task.dueDate === todayDate ? "Today" : formatDateLabel(task.dueDate)}</span><button className="row-menu" aria-label="More actions" onClick={() => { deleteTaskMut.mutate({ taskId: Number(task.id) }); toast.success("Task removed"); }}><Trash2 size={15} /></button></div>; })}
                   {todaysTasks.length === 0 && <div className="empty-state"><ListChecks size={26} /><strong>No tasks here yet</strong><span>Add a task to shape your day.</span></div>}
                 </div>
                 <div className="list-footer"><span><Check size={15} /> {completedCount} of {todaysTasks.length} completed</span><button onClick={() => { todaysTasks.filter(t => t.completed).forEach(t => deleteTaskMut.mutate({ taskId: Number(t.id) })); toast.success("Cleared completed tasks"); }}>Clear completed</button></div>
