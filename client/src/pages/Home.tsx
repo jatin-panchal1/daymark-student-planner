@@ -343,10 +343,44 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
     };
   }, [lcData, cfData, codingSettings]);
 
-  const createSubjectMut = trpc.planner.createSubject.useMutation({ onSuccess: () => { trpcCtx.planner.subjects.invalidate(); trpcCtx.planner.schedules.invalidate(); }});
+  const createSubjectMut = trpc.planner.createSubject.useMutation({
+    onMutate: async (input) => {
+      await trpcCtx.planner.subjects.cancel();
+      const prev = trpcCtx.planner.subjects.getData();
+      trpcCtx.planner.subjects.setData(undefined, (old) => [...(old ?? []), { id: -Date.now(), name: input.name, code: null, color: "#8ea7ff", userId: 0, createdAt: new Date() }]);
+      return { prev };
+    },
+    onError: (_err, _input, ctx) => { if (ctx?.prev) trpcCtx.planner.subjects.setData(undefined, ctx.prev); toast.error("Failed to add subject"); },
+    onSettled: () => { trpcCtx.planner.subjects.invalidate(); trpcCtx.planner.schedules.invalidate(); }
+  });
   const upsertSubjectMut = trpc.planner.upsertSubject.useMutation({ onSuccess: () => { trpcCtx.planner.subjects.invalidate(); trpcCtx.planner.schedules.invalidate(); }});
   const clearAllSubjectsMut = trpc.planner.clearAllSubjects.useMutation({ onSuccess: () => { trpcCtx.planner.subjects.invalidate(); trpcCtx.planner.schedules.invalidate(); trpcCtx.planner.tasks.invalidate(); trpcCtx.planner.checkins.invalidate(); }});
-  const createTaskMut = trpc.planner.createTask.useMutation({ onSuccess: () => trpcCtx.planner.tasks.invalidate() });
+  
+  // ── Optimistic: Create Task ──
+  const createTaskMut = trpc.planner.createTask.useMutation({
+    onMutate: async (input) => {
+      await trpcCtx.planner.tasks.cancel();
+      const prev = trpcCtx.planner.tasks.getData();
+      trpcCtx.planner.tasks.setData(undefined, (old) => [
+        ...(old ?? []),
+        {
+          id: -Date.now(),
+          title: input.title,
+          subjectId: input.subjectId ?? null,
+          isCompleted: false,
+          dueDate: input.dueDate ?? null,
+          dueTime: input.dueTime ?? null,
+          priority: input.priority,
+          recurringDays: input.recurringDays?.length ? input.recurringDays.join(",") : null,
+          userId: 0,
+          createdAt: new Date()
+        }
+      ]);
+      return { prev };
+    },
+    onError: (_err, _input, ctx) => { if (ctx?.prev) trpcCtx.planner.tasks.setData(undefined, ctx.prev); toast.error("Failed to create task"); },
+    onSettled: () => trpcCtx.planner.tasks.invalidate(),
+  });
 
   // ── Optimistic: Toggle Daily Task Completion (per-day) ──
   const toggleDailyCompletionMut = trpc.planner.toggleDailyCompletion.useMutation({
@@ -364,7 +398,32 @@ export default function Home({ user, onLogout }: { user: AuthUser; onLogout: () 
     onError: (_err, _input, ctx) => { if (ctx?.prev) trpcCtx.planner.taskCompletions.setData({ date: ctx.date }, ctx.prev); toast.error("Failed to update task"); },
     onSettled: (_d, _e, input) => trpcCtx.planner.taskCompletions.invalidate({ date: input.date }),
   });
-  const createEventMut = trpc.planner.createEvent.useMutation({ onSuccess: () => trpcCtx.planner.events.invalidate() });
+  // ── Optimistic: Create Event ──
+  const createEventMut = trpc.planner.createEvent.useMutation({
+    onMutate: async (input) => {
+      await trpcCtx.planner.events.cancel();
+      const prev = trpcCtx.planner.events.getData();
+      trpcCtx.planner.events.setData(undefined, (old) => [
+        ...(old ?? []),
+        {
+          id: -Date.now(),
+          kind: input.kind,
+          title: input.title,
+          startDate: input.startDate,
+          endDate: input.endDate ?? null,
+          subject: input.subject ?? null,
+          examTime: input.examTime ?? null,
+          afterClass: input.afterClass ?? null,
+          afterSubject: input.afterSubject ?? null,
+          userId: 0,
+          createdAt: new Date()
+        }
+      ]);
+      return { prev };
+    },
+    onError: (_err, _input, ctx) => { if (ctx?.prev) trpcCtx.planner.events.setData(undefined, ctx.prev); toast.error("Failed to create event"); },
+    onSettled: () => trpcCtx.planner.events.invalidate(),
+  });
   const importEventsMut = trpc.planner.importEvents.useMutation({ onSuccess: () => trpcCtx.planner.events.invalidate() });
 
   // ── Optimistic: Delete Subject ──
